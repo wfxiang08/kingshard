@@ -60,6 +60,7 @@ func (c *Conn) Connect(addr string, user string, password string, db string) err
 	c.db = db
 
 	//use utf8
+	// TODO: 支持其他编码? 例如: utf8mb4
 	c.collation = mysql.DEFAULT_COLLATION_ID
 	c.charset = mysql.DEFAULT_CHARSET
 
@@ -71,6 +72,7 @@ func (c *Conn) ReConnect() error {
 		c.conn.Close()
 	}
 
+	// tcp, unix协议的支持
 	n := "tcp"
 	if strings.Contains(c.addr, "/") {
 		n = "unix"
@@ -88,11 +90,17 @@ func (c *Conn) ReConnect() error {
 	// The default is true (no delay),
 	// meaning that data is sent as soon as possible after a Write.
 	//I set this option false.
+	// 为什么呢?
 	tcpConn.SetNoDelay(false)
 	tcpConn.SetKeepAlive(true)
 	c.conn = tcpConn
+
+	// 如何创建MySQL的链接呢?
+	// TCP Connection/Unix Socket --> pkg
 	c.pkg = mysql.NewPacketIO(tcpConn)
 
+	// 建立连接
+	// 此处是作为client去连接Remote的Server, 因此需要先读取Handshake, 然后再回复
 	if err := c.readInitialHandshake(); err != nil {
 		c.conn.Close()
 		return err
@@ -111,6 +119,7 @@ func (c *Conn) ReConnect() error {
 	}
 
 	//we must always use autocommit
+	//默认是autocommit, 如果不是这样，会有很多问题需要考虑
 	if !c.IsAutoCommit() {
 		if _, err := c.exec("set autocommit = 1"); err != nil {
 			c.conn.Close()
@@ -353,6 +362,7 @@ func (c *Conn) Ping() error {
 	return nil
 }
 
+// 建立连接之后选择 database
 func (c *Conn) UseDB(dbName string) error {
 	if c.db == dbName || len(dbName) == 0 {
 		return nil
@@ -378,6 +388,7 @@ func (c *Conn) GetAddr() string {
 	return c.addr
 }
 
+// 如何执行命令?
 func (c *Conn) Execute(command string, args ...interface{}) (*mysql.Result, error) {
 	if len(args) == 0 {
 		return c.exec(command)
@@ -397,6 +408,7 @@ func (c *Conn) ClosePrepare(id uint32) error {
 	return c.writeCommandUint32(mysql.COM_STMT_CLOSE, id)
 }
 
+// 事务相关的操作
 func (c *Conn) Begin() error {
 	_, err := c.exec("begin")
 	return err
@@ -412,6 +424,7 @@ func (c *Conn) Rollback() error {
 	return err
 }
 
+// 设置AutoCommit
 func (c *Conn) SetAutoCommit(n uint8) error {
 	if n == 0 {
 		if _, err := c.exec("set autocommit = 0"); err != nil {
@@ -429,6 +442,7 @@ func (c *Conn) SetAutoCommit(n uint8) error {
 	return nil
 }
 
+// 重置字符集合
 func (c *Conn) SetCharset(charset string, collation mysql.CollationId) error {
 	charset = strings.Trim(charset, "\"'`")
 
@@ -493,6 +507,7 @@ func (c *Conn) FieldList(table string, wildcard string) ([]*mysql.Field, error) 
 	return nil, fmt.Errorf("field list error")
 }
 
+// 直接执行Query --> writeCommandStr
 func (c *Conn) exec(query string) (*mysql.Result, error) {
 	if err := c.writeCommandStr(mysql.COM_QUERY, query); err != nil {
 		return nil, err
@@ -606,6 +621,7 @@ func (c *Conn) readResultRows(result *mysql.Result, isBinary bool) (err error) {
 	return nil
 }
 
+// 读取Packet
 func (c *Conn) readUntilEOF() (err error) {
 	var data []byte
 
@@ -698,6 +714,7 @@ func (c *Conn) readResult(binary bool) (*mysql.Result, error) {
 		return nil, err
 	}
 
+	// 如何处理返回的数据呢?
 	if data[0] == mysql.OK_HEADER {
 		return c.handleOKPacket(data)
 	} else if data[0] == mysql.ERR_HEADER {
@@ -706,6 +723,7 @@ func (c *Conn) readResult(binary bool) (*mysql.Result, error) {
 		return nil, mysql.ErrMalformPacket
 	}
 
+	// 其他的情况? 直接返回？？
 	return c.readResultset(data, binary)
 }
 

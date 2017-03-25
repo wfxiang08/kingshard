@@ -21,6 +21,7 @@ import (
 	"unsafe"
 )
 
+// 低成本，高风险的数据拷贝
 // no copy to change slice to string
 // use your own risk
 func String(b []byte) (s string) {
@@ -42,10 +43,12 @@ func Slice(s string) (b []byte) {
 	return
 }
 
+//
+// /*node2*/select * from kingshard_test_conn; --> *node2* select * from table_name
+//
+//
 func IsSqlSep(r rune) bool {
-	return r == ' ' || r == ',' ||
-		r == '\t' || r == '/' ||
-		r == '\n' || r == '\r'
+	return r == ' ' || r == ',' || r == '\t' || r == '/' || r == '\n' || r == '\r'
 }
 
 func ArrayToString(array []int) string {

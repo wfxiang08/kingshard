@@ -41,14 +41,7 @@ const (
 	MaxLogSize = 1024 * 1024 * 1024
 )
 
-const banner string = `
-    __   _                  __                   __
-   / /__(_)___  ____ ______/ /_  ____ __________/ /
-  / //_/ / __ \/ __ \/ ___/ __ \ / __\/ ___/ __  /
- / ,< / / / / / /_/ (__  ) / / / /_/ / /  / /_/ /
-/_/|_/_/_/ /_/\__, /____/_/ /_/\__,_/_/   \__,_/
-             /____/
-`
+const banner string = `我是kingshard`
 
 func main() {
 	fmt.Print(banner)
@@ -64,12 +57,14 @@ func main() {
 		return
 	}
 
+	// 解析配置文件
 	cfg, err := config.ParseConfigFile(*configFile)
 	if err != nil {
 		fmt.Printf("parse config file error:%v\n", err.Error())
 		return
 	}
 
+	// 设置Log文件
 	//when the log file size greater than 1GB, kingshard will generate a new file
 	if len(cfg.LogPath) != 0 {
 		sysFilePath := path.Join(cfg.LogPath, sysLogName)
@@ -97,7 +92,10 @@ func main() {
 
 	var svr *server.Server
 	var apiSvr *web.ApiServer
+
+	// 最核心的逻辑： Server
 	svr, err = server.NewServer(cfg)
+
 	if err != nil {
 		golog.Error("main", "main", err.Error(), 0)
 		golog.GlobalSysLogger.Close()
@@ -113,6 +111,7 @@ func main() {
 		return
 	}
 
+	// 监听signal
 	sc := make(chan os.Signal, 1)
 	signal.Notify(sc,
 		syscall.SIGINT,
@@ -123,18 +122,24 @@ func main() {
 
 	go func() {
 		for {
+			// 异步处理信号
 			sig := <-sc
 			if sig == syscall.SIGINT || sig == syscall.SIGTERM || sig == syscall.SIGQUIT {
 				golog.Info("main", "main", "Got signal", 0, "signal", sig)
 				golog.GlobalSysLogger.Close()
 				golog.GlobalSqlLogger.Close()
+
+				// 关闭Server, 然后: srv.run就结束
 				svr.Close()
 			} else if sig == syscall.SIGPIPE {
 				golog.Info("main", "main", "Ignore broken pipe signal", 0)
 			}
 		}
 	}()
+	// 对外提供API服务
 	go apiSvr.Run()
+
+	// 提供mysql server的服务
 	svr.Run()
 }
 

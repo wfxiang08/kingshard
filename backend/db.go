@@ -37,6 +37,7 @@ const (
 type DB struct {
 	sync.RWMutex
 
+	// 一个DB，对应后台的一个数据库，可能是Master，也可能是Slave
 	addr     string
 	user     string
 	password string
@@ -51,6 +52,7 @@ type DB struct {
 	lastPing    int64
 }
 
+// 创建一个DB
 func Open(addr string, user string, password string, dbName string, maxConnNum int) (*DB, error) {
 	var err error
 	db := new(DB)
@@ -59,6 +61,7 @@ func Open(addr string, user string, password string, dbName string, maxConnNum i
 	db.password = password
 	db.db = dbName
 
+	// InitConnNum 和 MaxConnNum
 	if 0 < maxConnNum {
 		db.maxConnNum = maxConnNum
 		if db.maxConnNum < 16 {
@@ -70,6 +73,8 @@ func Open(addr string, user string, password string, dbName string, maxConnNum i
 		db.maxConnNum = DefaultMaxConnNum
 		db.InitConnNum = InitConnCount
 	}
+
+	// 专门用于检测数据库是否还活着
 	//check connection
 	db.checkConn, err = db.newConn()
 	if err != nil {
@@ -77,10 +82,15 @@ func Open(addr string, user string, password string, dbName string, maxConnNum i
 		return nil, err
 	}
 
+	// 创建两个 chan
 	db.idleConns = make(chan *Conn, db.maxConnNum)
 	db.cacheConns = make(chan *Conn, db.maxConnNum)
 	atomic.StoreInt32(&(db.state), Unknown)
 
+	// 这里是什么逻辑呢?
+	// cacheConns/idleConns
+	// idleConns 只有Conn对象，没有实际的连接
+	//
 	for i := 0; i < db.maxConnNum; i++ {
 		if i < db.InitConnNum {
 			conn, err := db.newConn()
@@ -186,7 +196,6 @@ func (db *DB) Ping() error {
 
 func (db *DB) newConn() (*Conn, error) {
 	co := new(Conn)
-
 	if err := co.Connect(db.addr, db.user, db.password, db.db); err != nil {
 		return nil, err
 	}
@@ -197,6 +206,8 @@ func (db *DB) newConn() (*Conn, error) {
 func (db *DB) closeConn(co *Conn) error {
 	if co != nil {
 		co.Close()
+
+		// idleConns中保存的是 closed Conn
 		conns := db.getIdleConns()
 		if conns != nil {
 			select {
@@ -231,6 +242,7 @@ func (db *DB) tryReuse(co *Conn) error {
 
 	//connection may be set names early
 	//we must use default utf8
+	// TODO: 优化这部分的设计
 	if co.GetCharset() != mysql.DEFAULT_CHARSET {
 		err = co.SetCharset(mysql.DEFAULT_CHARSET, mysql.DEFAULT_COLLATION_ID)
 		if err != nil {
@@ -249,7 +261,11 @@ func (db *DB) PopConn() (*Conn, error) {
 	if cacheConns == nil || idleConns == nil {
 		return nil, errors.ErrDatabaseClose
 	}
+
+	// 优先考虑: cache
 	co = db.GetConnFromCache(cacheConns)
+
+	// 读取idles
 	if co == nil {
 		co, err = db.GetConnFromIdle(cacheConns, idleConns)
 		if err != nil {
@@ -257,6 +273,7 @@ func (db *DB) PopConn() (*Conn, error) {
 		}
 	}
 
+	// 重用Connection
 	err = db.tryReuse(co)
 	if err != nil {
 		db.closeConn(co)
@@ -266,13 +283,20 @@ func (db *DB) PopConn() (*Conn, error) {
 	return co, nil
 }
 
+//
+// 从Cache中获取一个 DB
+//
 func (db *DB) GetConnFromCache(cacheConns chan *Conn) *Conn {
 	var co *Conn
 	var err error
 	for 0 < len(cacheConns) {
+		// 获取一个Cache的Connection
 		co = <-cacheConns
+		// 需要主动去Ping一下后端服务器
 		if co != nil && PingPeroid < time.Now().Unix()-co.pushTimestamp {
 			err = co.Ping()
+
+			// Ping失败了，再选择下一个
 			if err != nil {
 				db.closeConn(co)
 				co = nil
@@ -285,6 +309,7 @@ func (db *DB) GetConnFromCache(cacheConns chan *Conn) *Conn {
 	return co
 }
 
+// 从 cacheConn或 idleConns中获取一个Connection
 func (db *DB) GetConnFromIdle(cacheConns, idleConns chan *Conn) (*Conn, error) {
 	var co *Conn
 	var err error
@@ -311,6 +336,9 @@ func (db *DB) GetConnFromIdle(cacheConns, idleConns chan *Conn) (*Conn, error) {
 	return co, nil
 }
 
+//
+// 用完之后归还Connection, 如果不Cache, 则直接关闭
+//
 func (db *DB) PushConn(co *Conn, err error) {
 	if co == nil {
 		return

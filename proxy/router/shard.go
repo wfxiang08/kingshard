@@ -37,6 +37,7 @@ func NewKeyError(format string, args ...interface{}) KeyError {
 	return KeyError(fmt.Sprintf(format, args...))
 }
 
+// 实现Error接口
 func (ke KeyError) Error() string {
 	return string(ke)
 }
@@ -127,6 +128,9 @@ type RangeShard interface {
 	EqualStop(key interface{}, index int) bool
 }
 
+//
+// TODO: 实现自定义的HashShard函数
+//
 type HashShard struct {
 	ShardNum int
 }
@@ -137,6 +141,7 @@ func (s *HashShard) FindForKey(key interface{}) (int, error) {
 	return int(h % uint64(s.ShardNum)), nil
 }
 
+// 给定一些列的Range
 type NumRangeShard struct {
 	Shards []NumKeyRange
 }
@@ -185,9 +190,11 @@ func (s *DateYearShard) FindForKey(key interface{}) (int, error) {
 	panic(NewKeyError("Unexpected key variable type %T", key))
 }
 
+
 type DateMonthShard struct {
 }
-
+// key的长度可以比YYYY-MM-DD长，
+// 返回: 201701
 //the format of date is: YYYY-MM-DD HH:MM:SS,YYYY-MM-DD or unix timestamp(int)
 func (s *DateMonthShard) FindForKey(key interface{}) (int, error) {
 	timeFormat := "2006-01-02"
@@ -233,12 +240,17 @@ func (s *DateMonthShard) FindForKey(key interface{}) (int, error) {
 	panic(NewKeyError("Unexpected key variable type %T", key))
 }
 
+// 按照日期做Sharding
+// 返回年月日, 例如: 20170101
 type DateDayShard struct {
 }
 
 //the format of date is: YYYY-MM-DD HH:MM:SS,YYYY-MM-DD or unix timestamp(int)
 func (s *DateDayShard) FindForKey(key interface{}) (int, error) {
 	timeFormat := "2006-01-02"
+	// 返回年月日
+	// 日期的格式：int(s)或string
+	//
 	switch val := key.(type) {
 	case int:
 		tm := time.Unix(int64(val), 0)
@@ -281,6 +293,9 @@ func (s *DateDayShard) FindForKey(key interface{}) (int, error) {
 	panic(NewKeyError("Unexpected key variable type %T", key))
 }
 
+//
+// 默认的Shard总是返回1
+//
 type DefaultShard struct {
 }
 

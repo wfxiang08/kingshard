@@ -36,6 +36,17 @@ var (
 	MonthsCount       = 12
 )
 
+//-
+//    db : kingshard
+//    table: test_shard_hash
+//    key: id
+//    nodes: [node1, node2]
+//    type: hash
+//    locations: [4,4]
+
+//
+// 定义了Proxy的路由规则， 例如：<DB, Table> --> <Key, Type, Nodes等信息>
+//
 type Rule struct {
 	DB    string
 	Table string
@@ -65,6 +76,7 @@ func NewDefaultRule(node string) *Rule {
 	return r
 }
 
+// 给定的Rule, 如何获取对应的Node
 func (r *Rule) FindNode(key interface{}) (string, error) {
 	tableIndex, err := r.Shard.FindForKey(key)
 	if err != nil {
@@ -79,6 +91,8 @@ func (r *Rule) FindNodeIndex(key interface{}) (int, error) {
 	if err != nil {
 		return -1, err
 	}
+
+	// 获取Node的Index
 	return r.TableToNode[tableIndex], nil
 }
 
@@ -145,15 +159,23 @@ func NewRouter(schemaConfig *config.SchemaConfig) (*Router, error) {
 	return rt, nil
 }
 
+//
+// 如何获取Rule呢?
+//
 func (r *Router) GetRule(db, table string) *Rule {
 	arry := strings.Split(table, ".")
+
+	// table中如果指定了db, 则以table为准
 	if len(arry) == 2 {
 		table = strings.Trim(arry[1], "`")
 		db = strings.Trim(arry[0], "`")
 	}
+
+	// 获取rule
 	rule := r.Rules[db][table]
 	if rule == nil {
-		//set the database of default rule
+		// set the database of default rule
+		// TODO: 这个地方是否存在风险呢?
 		r.DefaultRule.DB = db
 		return r.DefaultRule
 	} else {
@@ -271,7 +293,7 @@ func includeNode(nodes []string, node string) bool {
 	return false
 }
 
-//build a router plan
+// build a router plan
 func (r *Router) BuildPlan(db string, statement sqlparser.Statement) (*Plan, error) {
 	//因为实现Statement接口的方法都是指针类型，所以type对应类型也是指针类型
 	switch stmt := statement.(type) {

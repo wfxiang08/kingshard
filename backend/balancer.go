@@ -59,6 +59,7 @@ func (n *Node) InitBalancer() {
 		sum += weight / gcd
 	}
 
+	// RoundRobinQ 将每一个weight作为一个元素，存放在RoundRobinQ中
 	n.RoundRobinQ = make([]int, 0, sum)
 	for index, weight := range n.SlaveWeights {
 		for j := 0; j < weight/gcd; j++ {
@@ -66,6 +67,7 @@ func (n *Node) InitBalancer() {
 		}
 	}
 
+	// 随机排序
 	//random order
 	if 1 < len(n.SlaveWeights) {
 		r := rand.New(rand.NewSource(time.Now().UnixNano()))
@@ -79,22 +81,27 @@ func (n *Node) InitBalancer() {
 	}
 }
 
+// 获取下一个DB?
 func (n *Node) GetNextSlave() (*DB, error) {
 	var index int
 	queueLen := len(n.RoundRobinQ)
 	if queueLen == 0 {
 		return nil, errors.ErrNoDatabase
 	}
+
+	// 只有一个，直接返回
 	if queueLen == 1 {
 		index = n.RoundRobinQ[0]
 		return n.Slave[index], nil
 	}
 
+	// 获取一个Index
 	n.LastSlaveIndex = n.LastSlaveIndex % queueLen
 	index = n.RoundRobinQ[n.LastSlaveIndex]
 	if len(n.Slave) <= index {
 		return nil, errors.ErrNoDatabase
 	}
+
 	db := n.Slave[index]
 	n.LastSlaveIndex++
 	n.LastSlaveIndex = n.LastSlaveIndex % queueLen

@@ -108,18 +108,24 @@ func (s *ApiServer) GetNodesStatus(c echo.Context) error {
 			dbStatus = append(dbStatus, slaveStatus)
 		}
 	}
+
+	// 以JSON格式返回数据
 	return c.JSON(http.StatusOK, dbStatus)
 }
 
 func (s *ApiServer) AddOneSlave(c echo.Context) error {
+	// 解析参数（一定要通过结构体来解析json数据)
 	args := struct {
 		Node string `json:"node"`
 		Addr string `json:"addr"`
 	}{}
 	err := c.Bind(&args)
+
 	if err != nil {
 		return err
 	}
+
+	// 添加slave
 	err = s.proxy.AddSlave(args.Node, args.Addr)
 	if err != nil {
 		return err

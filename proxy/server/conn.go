@@ -72,12 +72,15 @@ var DEFAULT_CAPABILITY uint32 = mysql.CLIENT_LONG_PASSWORD | mysql.CLIENT_LONG_F
 var baseConnId uint32 = 10000
 
 func (c *ClientConn) IsAllowConnect() bool {
+	// 获取RemoteIP
 	clientHost, _, err := net.SplitHostPort(c.c.RemoteAddr().String())
 	if err != nil {
 		fmt.Println(err)
 	}
 	clientIP := net.ParseIP(clientHost)
 
+	// 判断是否支持Ip限制，如果没有限制，则直接放行
+	// 如果有限制，则做一个过滤
 	ipVec := c.proxy.allowips[c.proxy.allowipsIndex]
 	if ipVecLen := len(ipVec); ipVecLen == 0 {
 		return true
@@ -93,13 +96,19 @@ func (c *ClientConn) IsAllowConnect() bool {
 	return false
 }
 
+//
+// MySQL如何握手呢?
+//
 func (c *ClientConn) Handshake() error {
+
+	// 服务器Handshake到Client
 	if err := c.writeInitialHandshake(); err != nil {
 		golog.Error("server", "Handshake", err.Error(),
 			c.connectionId, "msg", "send initial handshake error")
 		return err
 	}
 
+	// 等待Client回复
 	if err := c.readHandshakeResponse(); err != nil {
 		golog.Error("server", "readHandshakeResponse",
 			err.Error(), c.connectionId,
@@ -107,6 +116,7 @@ func (c *ClientConn) Handshake() error {
 		return err
 	}
 
+	// OK就完事
 	if err := c.writeOK(nil); err != nil {
 		golog.Error("server", "readHandshakeResponse",
 			"write ok fail",
@@ -118,19 +128,21 @@ func (c *ClientConn) Handshake() error {
 	return nil
 }
 
+// 多次调用不会有副作用
 func (c *ClientConn) Close() error {
+
 	if c.closed {
 		return nil
 	}
 
 	c.c.Close()
-
 	c.closed = true
 
 	return nil
 }
 
 func (c *ClientConn) writeInitialHandshake() error {
+	// 前4个bytes作用?
 	data := make([]byte, 4, 128)
 
 	//min version 10
@@ -140,18 +152,23 @@ func (c *ClientConn) writeInitialHandshake() error {
 	data = append(data, mysql.ServerVersion...)
 	data = append(data, 0)
 
-	//connection id
+	// connection id
+	// Connection的标志:
 	data = append(data, byte(c.connectionId), byte(c.connectionId>>8), byte(c.connectionId>>16), byte(c.connectionId>>24))
 
-	//auth-plugin-data-part-1
+	// auth-plugin-data-part-1
 	data = append(data, c.salt[0:8]...)
 
 	//filter [00]
 	data = append(data, 0)
 
 	//capability flag lower 2 bytes, using default capability here
+	//
+	// DEFAULT_CAPABILITY 的4个字节，在不同地方发送
+	//
 	data = append(data, byte(DEFAULT_CAPABILITY), byte(DEFAULT_CAPABILITY>>8))
 
+	// TODO: 需要定制, 可能优先支持utf8mb4编码
 	//charset, utf-8 default
 	data = append(data, uint8(mysql.DEFAULT_COLLATION_ID))
 
@@ -174,9 +191,11 @@ func (c *ClientConn) writeInitialHandshake() error {
 	//filter [00]
 	data = append(data, 0)
 
+	// 最终的Payload是通过Packet一口气写出去的
 	return c.writePacket(data)
 }
 
+// Packet的读写
 func (c *ClientConn) readPacket() ([]byte, error) {
 	return c.pkg.ReadPacket()
 }
@@ -185,11 +204,13 @@ func (c *ClientConn) writePacket(data []byte) error {
 	return c.pkg.WritePacket(data)
 }
 
+// Packets的一口气写完
 func (c *ClientConn) writePacketBatch(total, data []byte, direct bool) ([]byte, error) {
 	return c.pkg.WritePacketBatch(total, data, direct)
 }
 
 func (c *ClientConn) readHandshakeResponse() error {
+	// 读取Packet
 	data, err := c.readPacket()
 
 	if err != nil {
@@ -222,6 +243,10 @@ func (c *ClientConn) readHandshakeResponse() error {
 	pos++
 	auth := data[pos : pos+authLen]
 
+	//
+	// 校验用户名和密码
+	// TODO: 可以支持多个用户名和密码
+	//
 	checkAuth := mysql.CalcPassword(c.salt, []byte(c.proxy.cfg.Password))
 	if c.user != c.proxy.cfg.User || !bytes.Equal(auth, checkAuth) {
 		golog.Error("ClientConn", "readHandshakeResponse", "error", 0,
@@ -250,7 +275,11 @@ func (c *ClientConn) readHandshakeResponse() error {
 	return nil
 }
 
+//
+// ClientConn 如何运转呢？
+//
 func (c *ClientConn) Run() {
+	// 处理异常? 这些代码能否统一起来呢?
 	defer func() {
 		r := recover()
 		if err, ok := r.(error); ok {
@@ -267,47 +296,64 @@ func (c *ClientConn) Run() {
 	}()
 
 	for {
+		// 读取来自Client的请求
 		data, err := c.readPacket()
 
+		// 出错，则Over
 		if err != nil {
 			return
 		}
 
+		// 分配请求: 有点点想Codis的模式
 		if err := c.dispatch(data); err != nil {
 			c.proxy.counter.IncrErrLogTotal()
+
 			golog.Error("server", "Run",
 				err.Error(), c.connectionId,
 			)
+
+			// 给客户端报错，结束Connection
 			c.writeError(err)
 			if err == mysql.ErrBadConn {
 				c.Close()
 			}
 		}
 
+		// 如果close, 则暂停
 		if c.closed {
 			return
 		}
 
+		// Sequence 限定在一个交互中，一个Payload过大时， Sequence会比较有用，其他情况下, Sequence都为0
 		c.pkg.Sequence = 0
 	}
 }
 
+//
+// 收到client的请求，如何处理呢？
+//
 func (c *ClientConn) dispatch(data []byte) error {
 	c.proxy.counter.IncrClientQPS()
+
+	// 读取Command和data
 	cmd := data[0]
 	data = data[1:]
 
 	switch cmd {
 	case mysql.COM_QUIT:
+		// 退出
 		c.handleRollback()
 		c.Close()
 		return nil
 	case mysql.COM_QUERY:
 		return c.handleQuery(hack.String(data))
+
 	case mysql.COM_PING:
 		return c.writeOK(nil)
+
 	case mysql.COM_INIT_DB:
 		return c.handleUseDB(hack.String(data))
+
 	case mysql.COM_FIELD_LIST:
 		return c.handleFieldList(data)
 	case mysql.COM_STMT_PREPARE:
@@ -331,6 +377,7 @@ func (c *ClientConn) dispatch(data []byte) error {
 	return nil
 }
 
+// 返回数据给Client
 func (c *ClientConn) writeOK(r *mysql.Result) error {
 	if r == nil {
 		r = &mysql.Result{Status: c.status}
@@ -339,6 +386,7 @@ func (c *ClientConn) writeOK(r *mysql.Result) error {
 
 	data = append(data, mysql.OK_HEADER)
 
+	// 成功返回数据
 	data = append(data, mysql.PutLengthEncodedInt(r.AffectedRows)...)
 	data = append(data, mysql.PutLengthEncodedInt(r.InsertId)...)
 

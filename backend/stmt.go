@@ -43,6 +43,7 @@ func (s *Stmt) GetId() uint32 {
 	return s.id
 }
 
+// 多个参数如何处理呢?
 func (s *Stmt) Execute(args ...interface{}) (*mysql.Result, error) {
 	if err := s.write(args...); err != nil {
 		return nil, err
@@ -59,6 +60,7 @@ func (s *Stmt) Close() error {
 	return nil
 }
 
+// 如何写入参数呢?
 func (s *Stmt) write(args ...interface{}) error {
 	paramsNum := s.params
 
@@ -66,6 +68,7 @@ func (s *Stmt) write(args ...interface{}) error {
 		return fmt.Errorf("argument mismatch, need %d but got %d", s.params, len(args))
 	}
 
+	// 如何处理参数呢？
 	paramTypes := make([]byte, paramsNum<<1)
 	paramValues := make([][]byte, paramsNum)
 
@@ -148,6 +151,7 @@ func (s *Stmt) write(args ...interface{}) error {
 		length += len(paramValues[i])
 	}
 
+	// 如何构建data?
 	data := make([]byte, 4, 4+length)
 
 	data = append(data, mysql.COM_STMT_EXECUTE)
@@ -182,21 +186,25 @@ func (s *Stmt) write(args ...interface{}) error {
 }
 
 func (c *Conn) Prepare(query string) (*Stmt, error) {
+	// 1. 调用MySQL的Prepare
 	if err := c.writeCommandStr(mysql.COM_STMT_PREPARE, query); err != nil {
 		return nil, err
 	}
 
+	// 2. 读取Packet
 	data, err := c.readPacket()
 	if err != nil {
 		return nil, err
 	}
 
+	// 检查状态
 	if data[0] == mysql.ERR_HEADER {
 		return nil, c.handleErrorPacket(data)
 	} else if data[0] != mysql.OK_HEADER {
 		return nil, mysql.ErrMalformPacket
 	}
 
+	// 封装成为Stmt
 	s := new(Stmt)
 	s.conn = c
 

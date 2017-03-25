@@ -41,6 +41,8 @@ func NewApiServer(cfg *config.Config, srv *server.Server) (*ApiServer, error) {
 	s.webAddr = cfg.WebAddr
 	s.webUser = cfg.WebUser
 	s.webPassword = cfg.WebPassword
+
+	// 使用Echo服务
 	s.Echo = echo.New()
 	golog.Info("web", "NewApiServer", "Api Server running", 0,
 		"netProto",
@@ -59,6 +61,7 @@ func (s *ApiServer) Run() error {
 	return nil
 }
 
+// 配置日志, 异常处理，认证
 func (s *ApiServer) RegisterMiddleware() {
 	//s.Use(mw.Logger())
 	s.Use(mw.LoggerWithConfig(mw.LoggerConfig{
@@ -73,6 +76,7 @@ func (s *ApiServer) RegisterMiddleware() {
 }
 
 func (s *ApiServer) RegisterURL() {
+	// 注册URL
 	s.Get("/api/v1/nodes/status", s.GetNodesStatus)
 
 	s.Post("/api/v1/nodes/slaves", s.AddOneSlave)

@@ -52,12 +52,13 @@ const (
 )
 
 type Server struct {
-	cfg      *config.Config
-	addr     string
-	user     string
-	password string
+	cfg                *config.Config
+	addr               string
+	user               string
+	password           string
 	//db       string
 
+	// 这些是什么逻辑?
 	statusIndex        int32
 	status             [2]int32
 	logSqlIndex        int32
@@ -69,14 +70,15 @@ type Server struct {
 	allowipsIndex      int32
 	allowips           [2][]net.IP
 
-	counter *Counter
-	nodes   map[string]*backend.Node
-	schema  *Schema
+	counter            *Counter
+	nodes              map[string]*backend.Node
+	schema             *Schema
 
-	listener net.Listener
-	running  bool
+	listener           net.Listener
+	running            bool
 }
 
+// 返回Server的状态
 func (s *Server) Status() string {
 	var status string
 	switch s.status[s.statusIndex] {
@@ -94,6 +96,7 @@ func (s *Server) Status() string {
 
 //TODO
 func (s *Server) parseAllowIps() error {
+	// 切换版本?
 	atomic.StoreInt32(&s.allowipsIndex, 0)
 	cfg := s.cfg
 	if len(cfg.AllowIps) == 0 {
@@ -145,11 +148,32 @@ func (s *Server) parseBlackListSqls() error {
 	return nil
 }
 
+//
+// Node是什么概念呢？
+//
 func (s *Server) parseNode(cfg config.NodeConfig) (*backend.Node, error) {
 	var err error
+	// 在配置文件中有Node的定义
 	n := new(backend.Node)
 	n.Cfg = cfg
 
+    //name : node1
+    //
+    //# default max conns for mysql server
+    //max_conns_limit : 32
+    //
+    //# all mysql in a node must have the same user and password
+    //user :  root
+    //password : root
+    //
+    //# master represents a real mysql master server
+    //master : 127.0.0.1:3307
+    //
+    //# slave represents a real mysql salve server,and the number after '@' is
+    //# read load weight of this slave.
+    //#slave : 192.168.59.101:3307@2,192.168.59.101:3307@3
+    //down_after_noalive : 32
+	//
 	n.DownAfterNoAlive = time.Duration(cfg.DownAfterNoAlive) * time.Second
 	err = n.ParseMaster(cfg.Master)
 	if err != nil {
@@ -323,14 +347,22 @@ func (s *Server) newClientConn(co net.Conn) *ClientConn {
 }
 
 func (s *Server) onConn(c net.Conn) {
+	// 计数器
 	s.counter.IncrClientConns()
+
+	// net.Conn 封装 ClientConn
+	// 底层的[]byte协议 --> Io Packet协议
+	//
 	conn := s.newClientConn(c) //新建一个conn
 
 	defer func() {
+		// 处理未处理的异常
 		err := recover()
 		if err != nil {
 			const size = 4096
 			buf := make([]byte, size)
+
+			// 获取runtime.Stack
 			buf = buf[:runtime.Stack(buf, false)] //获得当前goroutine的stacktrace
 			golog.Error("server", "onConn", "error", 0,
 				"remoteAddr", c.RemoteAddr().String(),
@@ -338,10 +370,14 @@ func (s *Server) onConn(c net.Conn) {
 			)
 		}
 
+		// 关闭Connection，处理计数器
+		// conn 多次Close不会有副作用
 		conn.Close()
 		s.counter.DecrClientConns()
 	}()
 
+
+	// 检查权限
 	if allowConnect := conn.IsAllowConnect(); allowConnect == false {
 		err := mysql.NewError(mysql.ER_ACCESS_DENIED_ERROR, "ip address access denied by kingshard.")
 		conn.writeError(err)
@@ -454,11 +490,11 @@ func (s *Server) DelAllowIP(v string) error {
 		ipVec2 := strings.Split(s.cfg.AllowIps, ",")
 		for i, ip := range s.allowips[1] {
 			if ip.Equal(clientIP) {
-				s.allowips[1] = append(s.allowips[1][:i], s.allowips[1][i+1:]...)
+				s.allowips[1] = append(s.allowips[1][:i], s.allowips[1][i + 1:]...)
 				atomic.StoreInt32(&s.allowipsIndex, 1)
 				for i, ip := range ipVec2 {
 					if ip == v {
-						ipVec2 = append(ipVec2[:i], ipVec2[i+1:]...)
+						ipVec2 = append(ipVec2[:i], ipVec2[i + 1:]...)
 						s.cfg.AllowIps = strings.Trim(strings.Join(ipVec2, ","), ",")
 						return nil
 					}
@@ -471,11 +507,11 @@ func (s *Server) DelAllowIP(v string) error {
 		ipVec2 := strings.Split(s.cfg.AllowIps, ",")
 		for i, ip := range s.allowips[0] {
 			if ip.Equal(clientIP) {
-				s.allowips[0] = append(s.allowips[0][:i], s.allowips[0][i+1:]...)
+				s.allowips[0] = append(s.allowips[0][:i], s.allowips[0][i + 1:]...)
 				atomic.StoreInt32(&s.allowipsIndex, 0)
 				for i, ip := range ipVec2 {
 					if ip == v {
-						ipVec2 = append(ipVec2[:i], ipVec2[i+1:]...)
+						ipVec2 = append(ipVec2[:i], ipVec2[i + 1:]...)
 						s.cfg.AllowIps = strings.Trim(strings.Join(ipVec2, ","), ",")
 						return nil
 					}
@@ -587,27 +623,39 @@ func (s *Server) SaveProxyConfig() error {
 	return nil
 }
 
+//
+// 监听端口，Running
+//
 func (s *Server) Run() error {
 	s.running = true
 
 	// flush counter
 	go s.flushCounter()
 
+	// 似乎不用考虑同步的问题
 	for s.running {
+		// 监听socket
+		// s.listener.Close() 或者有新请求，则返回
 		conn, err := s.listener.Accept()
 		if err != nil {
 			golog.Error("server", "Run", err.Error(), 0)
 			continue
 		}
 
+		// 处理单个的Connection
 		go s.onConn(conn)
 	}
 
 	return nil
 }
 
+//
+// 结束Running的状态，并且关闭端口监听
+//
 func (s *Server) Close() {
 	s.running = false
+
+	// 关闭端口监听
 	if s.listener != nil {
 		s.listener.Close()
 	}
@@ -628,7 +676,7 @@ func (s *Server) DeleteSlave(node string, addr string) error {
 	for i, v1 := range s.cfg.Nodes {
 		if node == v1.Name {
 			s1 := strings.Split(v1.Slave, backend.SlaveSplit)
-			s2 := make([]string, 0, len(s1)-1)
+			s2 := make([]string, 0, len(s1) - 1)
 			for _, v2 := range s1 {
 				hostPort := strings.Split(v2, backend.WeightSplit)[0]
 				if addr != hostPort {

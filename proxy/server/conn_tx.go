@@ -20,6 +20,9 @@ import (
 )
 
 func (c *ClientConn) isInTransaction() bool {
+	// 数据的事务模型:
+	// AutoCommit模式下，就没有显示的事务实现了，提交就完事
+	// 非AutoCommit模式下，需要通过Begin等显示地设置状态
 	return c.status&mysql.SERVER_STATUS_IN_TRANS > 0 ||
 		!c.isAutoCommit()
 }
@@ -28,6 +31,7 @@ func (c *ClientConn) isAutoCommit() bool {
 	return c.status&mysql.SERVER_STATUS_AUTOCOMMIT > 0
 }
 
+// Client开启事务, 然后所有的txConns都开始事务
 func (c *ClientConn) handleBegin() error {
 	for _, co := range c.txConns {
 		if err := co.Begin(); err != nil {
@@ -64,6 +68,8 @@ func (c *ClientConn) commit() (err error) {
 		co.Close()
 	}
 
+	// TODO: 这个是什么问题呢?
+	// 重置后端的Connection?
 	c.txConns = make(map[*backend.Node]*backend.BackendConn)
 	return
 }
@@ -71,6 +77,7 @@ func (c *ClientConn) commit() (err error) {
 func (c *ClientConn) rollback() (err error) {
 	c.status &= ^mysql.SERVER_STATUS_IN_TRANS
 
+	// 关闭到所有后端的Transactions
 	for _, co := range c.txConns {
 		if e := co.Rollback(); e != nil {
 			err = e
@@ -78,6 +85,8 @@ func (c *ClientConn) rollback() (err error) {
 		co.Close()
 	}
 
+	// TODO: 这个是什么问题呢?
+	// 重置后端的Connection?
 	c.txConns = make(map[*backend.Node]*backend.BackendConn)
 	return
 }

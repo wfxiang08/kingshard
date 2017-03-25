@@ -49,7 +49,9 @@ func (c *ClientConn) handleQuery(sql string) (err error) {
 		}
 	}()
 
+	// 如何执行query呢?
 	sql = strings.TrimRight(sql, ";") //删除sql语句最后的分号
+
 	hasHandled, err := c.preHandleShard(sql)
 	if err != nil {
 		golog.Error("server", "preHandleShard", err.Error(), 0,
@@ -105,8 +107,10 @@ func (c *ClientConn) handleQuery(sql string) (err error) {
 	return nil
 }
 
+// 获取获取后端的请求呢?
 func (c *ClientConn) getBackendConn(n *backend.Node, fromSlave bool) (co *backend.BackendConn, err error) {
 	if !c.isInTransaction() {
+		// 不在事务中，尝试获取一个Connection, 优先考虑 Slave, 其次考虑: Master
 		if fromSlave {
 			co, err = n.GetSlaveConn()
 			if err != nil {
@@ -120,19 +124,24 @@ func (c *ClientConn) getBackendConn(n *backend.Node, fromSlave bool) (co *backen
 			return
 		}
 	} else {
+		// 在事务中，则只能使用指定的node
 		var ok bool
 		co, ok = c.txConns[n]
 
 		if !ok {
+			// 如果没有，也只能获取Master Conn
 			if co, err = n.GetMasterConn(); err != nil {
 				return
 			}
 
+			// 后端的Connection和ClientConn的AutoCommit保持一致
 			if !c.isAutoCommit() {
 				if err = co.SetAutoCommit(0); err != nil {
 					return
 				}
 			} else {
+				// 开始事务
+				// c.isAutoCommit()
 				if err = co.Begin(); err != nil {
 					return
 				}
@@ -142,12 +151,14 @@ func (c *ClientConn) getBackendConn(n *backend.Node, fromSlave bool) (co *backen
 		}
 	}
 
+	// 使用指定的DB
 	if err = co.UseDB(c.db); err != nil {
 		//reset the database to null
 		c.db = ""
 		return
 	}
 
+	// 设置字符集??
 	if err = co.SetCharset(c.charset, c.collation); err != nil {
 		return
 	}

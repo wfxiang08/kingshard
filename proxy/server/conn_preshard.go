@@ -34,8 +34,12 @@ type ExecuteDB struct {
 }
 
 func (c *ClientConn) isBlacklistSql(sql string) bool {
+	// fingerprint如何处理呢?
 	fingerprint := mysql.GetFingerprint(sql)
+
 	md5 := mysql.GetMd5(fingerprint)
+
+	// 通过sql的md5来处理
 	if _, ok := c.proxy.blacklistSqls[c.proxy.blacklistSqlsIndex].sqls[md5]; ok {
 		return true
 	}
@@ -51,8 +55,11 @@ func (c *ClientConn) preHandleShard(sql string) (bool, error) {
 	if len(sql) == 0 {
 		return false, errors.ErrCmdUnsupport
 	}
-	//filter the blacklist sql
+
+	// 如何禁止某个SQL语句呢?
+	// filter the blacklist sql
 	if c.proxy.blacklistSqls[c.proxy.blacklistSqlsIndex].sqlsLen != 0 {
+		// 如果Blacklist，则返回
 		if c.isBlacklistSql(sql) {
 			golog.OutputSql("Forbidden", "%s->%s:%s",
 				c.c.RemoteAddr(),
@@ -64,12 +71,15 @@ func (c *ClientConn) preHandleShard(sql string) (bool, error) {
 		}
 	}
 
+	// 将sql分解成为tokens
 	tokens := strings.FieldsFunc(sql, hack.IsSqlSep)
 
 	if len(tokens) == 0 {
 		return false, errors.ErrCmdUnsupport
 	}
 
+	// 获取要执行的DB
+	// tokens该如何立即呢?
 	if c.isInTransaction() {
 		executeDB, err = c.GetTransExecDB(tokens, sql)
 	} else {
@@ -91,9 +101,13 @@ func (c *ClientConn) preHandleShard(sql string) (bool, error) {
 	if executeDB == nil {
 		return false, nil
 	}
+
+
+	//作为Proxy需要将请求转发给后端!!!!
 	//get connection in DB
 	conn, err := c.getBackendConn(executeDB.ExecNode, executeDB.IsSlave)
 	defer c.closeConn(conn, false)
+
 	if err != nil {
 		return false, err
 	}
@@ -128,6 +142,8 @@ func (c *ClientConn) preHandleShard(sql string) (bool, error) {
 func (c *ClientConn) GetTransExecDB(tokens []string, sql string) (*ExecuteDB, error) {
 	var err error
 	tokensLen := len(tokens)
+
+	// 获取执行的DB
 	executeDB := new(ExecuteDB)
 	executeDB.sql = sql
 
@@ -135,14 +151,18 @@ func (c *ClientConn) GetTransExecDB(tokens []string, sql string) (*ExecuteDB, er
 	executeDB.IsSlave = false
 
 	if 2 <= tokensLen {
+		// /*node2*/ --> *node2*
 		if tokens[0][0] == mysql.COMMENT_PREFIX {
 			nodeName := strings.Trim(tokens[0], mysql.COMMENT_STRING)
+
+			// 指定了节点
 			if c.schema.nodes[nodeName] != nil {
 				executeDB.ExecNode = c.schema.nodes[nodeName]
 			}
 		}
 	}
 
+	// 如果没有指定node, 那么也就是都是标准的mysql, 例如: insert, select等等
 	if executeDB.ExecNode == nil {
 		executeDB, err = c.GetExecDB(tokens, sql)
 		if err != nil {
@@ -153,6 +173,8 @@ func (c *ClientConn) GetTransExecDB(tokens []string, sql string) (*ExecuteDB, er
 		}
 		return executeDB, nil
 	}
+
+	// 不能跨表支持事务
 	if len(c.txConns) == 1 && c.txConns[executeDB.ExecNode] == nil {
 		return nil, errors.ErrTransInMulti
 	}
@@ -162,6 +184,7 @@ func (c *ClientConn) GetTransExecDB(tokens []string, sql string) (*ExecuteDB, er
 //if sql need shard return nil, else return the unshard db
 func (c *ClientConn) GetExecDB(tokens []string, sql string) (*ExecuteDB, error) {
 	tokensLen := len(tokens)
+	// 这里不考虑/*node*/这种情况
 	if 0 < tokensLen {
 		tokenId, ok := mysql.PARSE_TOKEN_MAP[strings.ToLower(tokens[0])]
 		if ok == true {
@@ -176,8 +199,10 @@ func (c *ClientConn) GetExecDB(tokens []string, sql string) (*ExecuteDB, error) 
 				return c.getUpdateExecDB(sql, tokens, tokensLen)
 			case mysql.TK_ID_SET:
 				return c.getSetExecDB(sql, tokens, tokensLen)
+
 			case mysql.TK_ID_SHOW:
 				return c.getShowExecDB(sql, tokens, tokensLen)
+
 			case mysql.TK_ID_TRUNCATE:
 				return c.getTruncateExecDB(sql, tokens, tokensLen)
 			default:
@@ -185,6 +210,8 @@ func (c *ClientConn) GetExecDB(tokens []string, sql string) (*ExecuteDB, error) 
 			}
 		}
 	}
+
+	// 如果没有给定Tokens, 然后呢?
 	executeDB := new(ExecuteDB)
 	executeDB.sql = sql
 	err := c.setExecuteNode(tokens, tokensLen, executeDB)

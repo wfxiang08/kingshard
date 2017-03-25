@@ -33,13 +33,17 @@ const (
 	WeightSplit = "@"
 )
 
+// Node是什么概念呢?
+// 1. Node对应配置文案中的node的定义，分为master, slave
+// 2. 内部包含多个DB, 每一个DB有自己的可用性检测
+//
 type Node struct {
 	Cfg config.NodeConfig
 
 	sync.RWMutex
 	Master *DB
+	Slave  []*DB
 
-	Slave          []*DB
 	LastSlaveIndex int
 	RoundRobinQ    []int
 	SlaveWeights   []int
@@ -75,12 +79,15 @@ func (n *Node) GetMasterConn() (*BackendConn, error) {
 
 func (n *Node) GetSlaveConn() (*BackendConn, error) {
 	n.Lock()
+	// 获取下一个Slave
+	// TODO:
 	db, err := n.GetNextSlave()
 	n.Unlock()
 	if err != nil {
 		return nil, err
 	}
 
+	// 可能失败，也可能是Down? 如果是Down, 为什么要返回呢?
 	if db == nil {
 		return nil, errors.ErrNoSlaveDB
 	}
@@ -97,10 +104,12 @@ func (n *Node) checkMaster() {
 		golog.Error("Node", "checkMaster", "Master is no alive", 0)
 		return
 	}
-
+	// 定期对数据库进行Ping
 	if err := db.Ping(); err != nil {
+		// Ping失败了，如何处理呢?
 		golog.Error("Node", "checkMaster", "Ping", 0, "db.Addr", db.Addr(), "error", err.Error())
 	} else {
+		// ping成功了，则更新状态
 		if atomic.LoadInt32(&(db.state)) == Down {
 			golog.Info("Node", "checkMaster", "Master up", 0, "db.Addr", db.Addr())
 			n.UpMaster(db.addr)
@@ -112,6 +121,7 @@ func (n *Node) checkMaster() {
 		return
 	}
 
+	// 标记Master数据库挂了
 	if int64(n.DownAfterNoAlive) > 0 && time.Now().Unix()-db.GetLastPing() > int64(n.DownAfterNoAlive/time.Second) {
 		golog.Info("Node", "checkMaster", "Master down", 0,
 			"db.Addr", db.Addr(),
@@ -126,6 +136,8 @@ func (n *Node) checkSlave() {
 		n.RUnlock()
 		return
 	}
+
+	// 拷贝一份
 	slaves := make([]*DB, len(n.Slave))
 	copy(slaves, n.Slave)
 	n.RUnlock()
@@ -134,6 +146,7 @@ func (n *Node) checkSlave() {
 		if err := slaves[i].Ping(); err != nil {
 			golog.Error("Node", "checkSlave", "Ping", 0, "db.Addr", slaves[i].Addr(), "error", err.Error())
 		} else {
+			// 如果OK, 则启动DB
 			if atomic.LoadInt32(&(slaves[i].state)) == Down {
 				golog.Info("Node", "checkSlave", "Slave up", 0, "db.Addr", slaves[i].Addr())
 				n.UpSlave(slaves[i].addr)
@@ -150,6 +163,10 @@ func (n *Node) checkSlave() {
 				"db.Addr", slaves[i].Addr(),
 				"slave_down_time", int64(n.DownAfterNoAlive/time.Second))
 			//If can't ping slave after DownAfterNoAlive, set slave Down
+
+			//
+			//TODO: 为什么不直接传递slaves[i]呢?
+			//
 			n.DownSlave(slaves[i].addr, Down)
 		}
 	}
@@ -266,11 +283,13 @@ func (n *Node) UpSlave(addr string) error {
 	n.Lock()
 	for k, slave := range n.Slave {
 		if slave.addr == addr {
-			n.Slave[k] = db
+			n.Slave[k] = db  // 直接替换对应的DB
 			n.Unlock()
 			return nil
 		}
 	}
+
+	// 否则添加一个DB
 	n.Slave = append(n.Slave, db)
 	n.Unlock()
 
@@ -301,6 +320,8 @@ func (n *Node) DownSlave(addr string, state int32) error {
 	//slave is *DB
 	for _, slave := range slaves {
 		if slave.addr == addr {
+			// 关闭对应的Slave? 然后呢?
+			// TODO:
 			slave.Close()
 			atomic.StoreInt32(&(slave.state), state)
 			break
@@ -328,6 +349,7 @@ func (n *Node) ParseSlave(slaveStr string) error {
 	if len(slaveStr) == 0 {
 		return nil
 	}
+	// 逗号分隔的字符串
 	slaveStr = strings.Trim(slaveStr, SlaveSplit)
 	slaveArray := strings.Split(slaveStr, SlaveSplit)
 	count := len(slaveArray)

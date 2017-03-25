@@ -39,6 +39,7 @@ func (kr NumKeyRange) MapKey() string {
 	return fmt.Sprintf("%d-%d", kr.String(), kr.End)
 }
 
+// 区间[Start, End)
 func (kr NumKeyRange) Contains(i int64) bool {
 	return kr.Start <= i && (kr.End == MaxNumKey || i < kr.End)
 }
@@ -47,6 +48,7 @@ func (kr NumKeyRange) String() string {
 	return fmt.Sprintf("{Start: %d, End: %d}", kr.Start, kr.End)
 }
 
+// 是否有: TableRowLimit 呢?
 func ParseNumSharding(Locations []int, TableRowLimit int) ([]NumKeyRange, error) {
 	tableCount := 0
 	length := len(Locations)

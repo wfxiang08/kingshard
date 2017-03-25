@@ -16,7 +16,7 @@ package mysql
 
 const (
 	MinProtocolVersion byte   = 10
-	MaxPayloadLen      int    = 1<<24 - 1
+	MaxPayloadLen      int    = (1 << 24) - 1
 	TimeFormat         string = "2006-01-02 15:04:05"
 	ServerVersion      string = "5.6.20-kingshard"
 )
@@ -28,6 +28,7 @@ const (
 	LocalInFile_HEADER byte = 0xfb
 )
 
+// MySQL的状态
 const (
 	SERVER_STATUS_IN_TRANS             uint16 = 0x0001
 	SERVER_STATUS_AUTOCOMMIT           uint16 = 0x0002

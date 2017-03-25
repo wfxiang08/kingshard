@@ -623,6 +623,7 @@ func makeBetweenList(start, end int, indexs []int) []int {
 	return nil
 }
 
+// l1, l2是有一个有序数组
 // l1 & l2
 func interList(l1 []int, l2 []int) []int {
 	if len(l1) == 0 || len(l2) == 0 {
