@@ -271,10 +271,13 @@ type Result struct {
 }
 
 type Resultset struct {
+	// Meta信息
 	Fields     []*Field
 	FieldNames map[string]int
-	Values     [][]interface{}
 
+	// Values和RowDatas的区别
+	// RowDatas是Values序列化的结果, 如果没有必要可以直接转发RowDatas, 节省时间
+	Values   [][]interface{}
 	RowDatas []RowData
 }
 

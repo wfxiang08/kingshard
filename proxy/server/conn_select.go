@@ -133,6 +133,7 @@ func (c *ClientConn) handleSelect(stmt *sqlparser.Select, args []interface{}) er
 		return err
 	}
 
+	// 合并来自多个表的结果
 	err = c.mergeSelectResult(rs, stmt)
 	if err != nil {
 		golog.Error("ClientConn", "handleSelect", err.Error(), c.connectionId)
@@ -145,6 +146,7 @@ func (c *ClientConn) mergeSelectResult(rs []*mysql.Result, stmt *sqlparser.Selec
 	var r *mysql.Result
 	var err error
 
+	// 如果没有GroupBy
 	if len(stmt.GroupBy) == 0 {
 		r, err = c.buildSelectOnlyResult(rs, stmt)
 	} else {
@@ -155,9 +157,11 @@ func (c *ClientConn) mergeSelectResult(rs []*mysql.Result, stmt *sqlparser.Selec
 		return err
 	}
 
+	// 排序
 	c.sortSelectResult(r.Resultset, stmt)
 	//to do, add log here, sort may error because order by key not exist in resultset fields
 
+	// Limit
 	if err := c.limitSelectResult(r.Resultset, stmt); err != nil {
 		return err
 	}
@@ -196,6 +200,7 @@ func (c *ClientConn) handleSimpleSelect(stmt *sqlparser.SimpleSelect) error {
 }
 
 //build select result with group by opt
+// 如何分组呢?
 func (c *ClientConn) buildSelectGroupByResult(rs []*mysql.Result,
 	stmt *sqlparser.Select) (*mysql.Result, error) {
 	var err error
@@ -210,6 +215,8 @@ func (c *ClientConn) buildSelectGroupByResult(rs []*mysql.Result,
 	}
 
 	funcExprs := c.getFuncExprs(stmt)
+
+	// 如果没有Funcs, 则如何Merge呢?
 	if len(funcExprs) == 0 {
 		r, err = c.mergeGroupByWithoutFunc(rs, groupByIndexs)
 	} else {
@@ -391,17 +398,20 @@ func (c *ClientConn) loadResultWithFuncIntoMap(rs []*mysql.Result,
 }
 
 //build select result without group by opt
-func (c *ClientConn) buildSelectOnlyResult(rs []*mysql.Result,
-	stmt *sqlparser.Select) (*mysql.Result, error) {
+func (c *ClientConn) buildSelectOnlyResult(rs []*mysql.Result, stmt *sqlparser.Select) (*mysql.Result, error) {
 	var err error
 	r := rs[0].Resultset
 	status := c.status | rs[0].Status
 
 	funcExprs := c.getFuncExprs(stmt)
+
 	if len(funcExprs) == 0 {
+		// 遍历其他的数据集合
 		for i := 1; i < len(rs); i++ {
 			status |= rs[i].Status
+			// 将Values/RowsDatas合并到rs[0]上
 			for j := range rs[i].Values {
+				// Values和RowDatas的区别?
 				r.Values = append(r.Values, rs[i].Values[j])
 				r.RowDatas = append(r.RowDatas, rs[i].RowDatas[j])
 			}
@@ -434,11 +444,15 @@ func (c *ClientConn) sortSelectResult(r *mysql.Resultset, stmt *sqlparser.Select
 	return r.Sort(sk)
 }
 
+//
+// 如何处理Limit请求呢?
+//
 func (c *ClientConn) limitSelectResult(r *mysql.Resultset, stmt *sqlparser.Select) error {
 	if stmt.Limit == nil {
 		return nil
 	}
 
+	// 计算offset
 	var offset, count int64
 	var err error
 	if stmt.Limit.Offset == nil {
@@ -472,20 +486,23 @@ func (c *ClientConn) limitSelectResult(r *mysql.Resultset, stmt *sqlparser.Selec
 		count = int64(len(r.Values)) - offset
 	}
 
+	// 最终只获取其中的一段
+	// TODO: 如何offset很大，则会存在性能问题
 	r.Values = r.Values[offset : offset+count]
 	r.RowDatas = r.RowDatas[offset : offset+count]
 
 	return nil
 }
 
-func (c *ClientConn) buildFuncExprResult(stmt *sqlparser.Select,
-	rs []*mysql.Result, funcExprs map[int]string) (*mysql.Resultset, error) {
+func (c *ClientConn) buildFuncExprResult(stmt *sqlparser.Select, rs []*mysql.Result,
+	funcExprs map[int]string) (*mysql.Resultset, error) {
 
 	var names []string
 	var err error
 	r := rs[0].Resultset
 	funcExprValues := make(map[int]interface{})
 
+	// 在 rs上执行每一个函数，并且将结果保存到: funcExprValues 中
 	for index, funcName := range funcExprs {
 		funcExprValue, err := c.calFuncExprValue(
 			funcName,
@@ -498,6 +515,7 @@ func (c *ClientConn) buildFuncExprResult(stmt *sqlparser.Select,
 		funcExprValues[index] = funcExprValue
 	}
 
+	// 生成合并之后的结果
 	r.Values, err = c.buildFuncExprValues(rs, funcExprValues)
 
 	if 0 < len(r.Values) {
@@ -515,6 +533,9 @@ func (c *ClientConn) buildFuncExprResult(stmt *sqlparser.Select,
 	return r, nil
 }
 
+//
+// 返回Statement中支持的Funcs
+//
 //get the index of funcExpr, the value is function name
 func (c *ClientConn) getFuncExprs(stmt *sqlparser.Select) map[int]string {
 	var f *sqlparser.FuncExpr
@@ -541,16 +562,19 @@ func (c *ClientConn) getFuncExprs(stmt *sqlparser.Select) map[int]string {
 	return funcExprs
 }
 
-func (c *ClientConn) getSumFuncExprValue(rs []*mysql.Result,
-	index int) (interface{}, error) {
+// 将Result中指定的字段求和
+func (c *ClientConn) getSumFuncExprValue(rs []*mysql.Result, index int) (interface{}, error) {
 	var sumf float64
 	var sumi int64
 	var IsInt bool
 	var err error
 	var result interface{}
 
+	// 不同的Result
 	for _, r := range rs {
+		// 每一个Result下有不同的Rows
 		for k := range r.Values {
+			// 从每一个Row中取出第index字段的Value, 然后再求和?
 			result, err = r.GetValue(k, index)
 			if err != nil {
 				return nil, err
@@ -705,8 +729,10 @@ func (c *ClientConn) getMinFuncExprValue(
 }
 
 //calculate the the value funcExpr(sum or count)
-func (c *ClientConn) calFuncExprValue(funcName string,
-	rs []*mysql.Result, index int) (interface{}, error) {
+//
+// 如何处理Sum, Max, Min, LastInsertId等数据呢?
+//
+func (c *ClientConn) calFuncExprValue(funcName string, rs []*mysql.Result, index int) (interface{}, error) {
 
 	var num int64
 	switch strings.ToLower(funcName) {
@@ -714,6 +740,7 @@ func (c *ClientConn) calFuncExprValue(funcName string,
 		if len(rs) == 0 {
 			return nil, nil
 		}
+		// 汇总数据
 		for _, r := range rs {
 			for k := range r.Values {
 				result, err := r.GetInt(k, index)

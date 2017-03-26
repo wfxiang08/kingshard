@@ -96,8 +96,10 @@ func (plan *Plan) getHashShardTableIndex(expr sqlparser.BoolExpr) ([]int, error)
 		// <=> NULL safe operator
 		case "=", "<=>": //=对应的分片
 			if plan.getValueType(criteria.Left) == EID_NODE {
+				// 如果左边是id, 那右边是Value
 				index, err = plan.getTableIndexByValue(criteria.Right)
 			} else {
+				// 如果右边是id, 那左边是Value
 				index, err = plan.getTableIndexByValue(criteria.Left)
 			}
 			if err != nil {
@@ -121,6 +123,7 @@ func (plan *Plan) getHashShardTableIndex(expr sqlparser.BoolExpr) ([]int, error)
 			//	return plan.notList(l), nil
 		}
 	case *sqlparser.RangeCond: //between ... and ...
+		// between等也和hash没有直接关系
 		return plan.Rule.SubTableIndexs, nil
 	default:
 		return plan.Rule.SubTableIndexs, nil
@@ -373,6 +376,7 @@ func (plan *Plan) checkValuesType(vals sqlparser.Values) sqlparser.Values {
 /*返回valExpr表达式对应的类型*/
 func (plan *Plan) getValueType(valExpr sqlparser.ValExpr) int {
 	switch node := valExpr.(type) {
+
 	case *sqlparser.ColName:
 		//remove table name
 		if string(node.Qualifier) == plan.Rule.Table {
@@ -394,10 +398,15 @@ func (plan *Plan) getValueType(valExpr sqlparser.ValExpr) int {
 	return OTHER_NODE
 }
 
+//
+// 根据查询条件获取相关的TableIndex, 递归地分析
+//
 func (plan *Plan) getTableIndexByBoolExpr(node sqlparser.BoolExpr) ([]int, error) {
 	switch node := node.(type) {
 	case *sqlparser.AndExpr:
-		fmt.Printf("case *sqlparser.AndExpr\n")
+
+		// A & B
+		// left & right
 		left, err := plan.getTableIndexByBoolExpr(node.Left)
 		if err != nil {
 			return nil, err
@@ -408,7 +417,8 @@ func (plan *Plan) getTableIndexByBoolExpr(node sqlparser.BoolExpr) ([]int, error
 		}
 		return interList(left, right), nil
 	case *sqlparser.OrExpr:
-		fmt.Printf("case *sqlparser.OrExpr\n")
+
+		// A or B
 		left, err := plan.getTableIndexByBoolExpr(node.Left)
 		if err != nil {
 			return nil, err
@@ -418,16 +428,19 @@ func (plan *Plan) getTableIndexByBoolExpr(node sqlparser.BoolExpr) ([]int, error
 			return nil, err
 		}
 		return unionList(left, right), nil
-	case *sqlparser.ParenBoolExpr: //加上括号的BoolExpr，node.Expr去掉了括号
-		fmt.Printf("case *sqlparser.ParenBoolExpr\n")
+	case *sqlparser.ParenBoolExpr:
+		//加上括号的BoolExpr，node.Expr去掉了括号
 		return plan.getTableIndexByBoolExpr(node.Expr)
 	case *sqlparser.ComparisonExpr:
 		// 例如: id in (1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22)
-		fmt.Printf("case *sqlparser.ComparisonExpr\n")
+		// 原子表达式
 		switch {
 		case sqlparser.StringIn(node.Operator, "=", "<", ">", "<=", ">=", "<=>"):
 			left := plan.getValueType(node.Left)
 			right := plan.getValueType(node.Right)
+			// id > 1
+			// 1 < id
+			// 这两种模式
 			if (left == EID_NODE && right == VALUE_NODE) || (left == VALUE_NODE && right == EID_NODE) {
 				return plan.getTableIndexs(node)
 			}
@@ -435,6 +448,8 @@ func (plan *Plan) getTableIndexByBoolExpr(node sqlparser.BoolExpr) ([]int, error
 			// 如何处理in, not in呢?
 			left := plan.getValueType(node.Left)
 			right := plan.getValueType(node.Right)
+			// id in (1, 2, 3)
+			// id not in (1, 2, 3)
 			if left == EID_NODE && right == LIST_NODE {
 				// 只处理in节点
 				if strings.EqualFold(node.Operator, "in") { //only deal with in expr, it's impossible to process not in here.
@@ -444,7 +459,7 @@ func (plan *Plan) getTableIndexByBoolExpr(node sqlparser.BoolExpr) ([]int, error
 			}
 		}
 	case *sqlparser.RangeCond:
-		fmt.Printf("case *sqlparser.RangeCond\n")
+		// 范围查询
 		left := plan.getValueType(node.Left)
 		from := plan.getValueType(node.From)
 		to := plan.getValueType(node.To)
