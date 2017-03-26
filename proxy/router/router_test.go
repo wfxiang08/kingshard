@@ -397,12 +397,21 @@ func TestWhereInPartitionByTableIndex(t *testing.T) {
 	// ensure no impact for not in
 	// 这是什么情况呢?
 	sql = "select * from test1 where id not in (0,1,2,3,4,5,6,7)"
-	checkPlan(t, sql, []int{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11}, []int{0, 1, 2})
+	checkPlan(t, sql,
+		[]int{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11},
+		[]int{0, 1, 2})
 
 }
 
 func TestDatePlan(t *testing.T) {
 	var sql string
+
+	//db: kingshard
+	//table: test_shard_year
+	//key: date
+	//nodes: [node2, node3]
+	//date_range: [2012-2015,2016-2018]
+	//type: date_year
 	//2016-03-06 13:37:26
 	sql = "select * from test_shard_year where date > 1457242646 "
 	checkPlan(t, sql,
@@ -474,6 +483,14 @@ func TestDatePlan(t *testing.T) {
 	)
 }
 
+//db: kingshard
+//table: test1
+//key: id
+//nodes: [node1,node2,node3]
+//locations: [4,4,4]
+//type: hash
+//
+// go test github.com/flike/kingshard/proxy/router -v -run "TestSelectPlan"
 func TestSelectPlan(t *testing.T) {
 	var sql string
 	t1 := makeList(0, 12)
@@ -484,6 +501,7 @@ func TestSelectPlan(t *testing.T) {
 	sql = "select * from test1 where id in (5, 8)"
 	checkPlan(t, sql, []int{5, 8}, []int{1, 2})
 
+	// hash shard对range没有特殊支持
 	sql = "select * from test1 where id > 5"
 
 	checkPlan(t, sql, t1, []int{0, 1, 2})
@@ -498,17 +516,27 @@ func TestSelectPlan(t *testing.T) {
 	checkPlan(t, sql, t1, []int{0, 1, 2})
 
 	sql = "select * from test1 where id not in (5, 6)"
-	checkPlan(t, sql, []int{0, 1, 2, 3, 4, 7, 8, 9, 10, 11}, []int{0, 1, 2})
+	checkPlan(t, sql, t1, []int{0, 1, 2})
 
 	sql = "select * from test1 where id in (5, 6) or (id in (5, 6, 7,8) and id in (1,5,7))"
 	checkPlan(t, sql, []int{5, 6, 7}, []int{1})
 
+    //-
+    //  db: kingshard
+    //  table: test2
+    //  key: id
+    //  type: range
+    //  nodes: [node1,node2,node3]
+    //  locations: [4,4,4]
+    //  table_row_limit: 10000
+	//
 	sql = "select * from test2 where id = 10000"
 	checkPlan(t, sql, []int{1}, []int{0})
 
 	sql = "select * from test2 where id between 10000 and 20000"
 	checkPlan(t, sql, []int{1, 2}, []int{0})
 
+	// id < 1000 or id > 100000
 	sql = "select * from test2 where id not between 1000 and 100000"
 	checkPlan(t, sql, []int{0, 10, 11}, []int{0, 2})
 
