@@ -290,10 +290,12 @@ func (plan *Plan) calRouteIndexs() error {
 	var err error
 	nodesCount := len(plan.Rule.Nodes)
 
+	// 默认是没有shard的
 	if plan.Rule.Type == DefaultRuleType {
 		plan.RouteNodeIndexs = []int{0}
 		return nil
 	}
+
 	if plan.Criteria == nil { //如果没有分表条件，则是全子表扫描
 		if plan.Rule.Type != DefaultRuleType {
 			golog.Error("Plan", "calRouteIndexs", "plan have no criteria", 0,
@@ -623,7 +625,7 @@ func makeBetweenList(start, end int, indexs []int) []int {
 	return nil
 }
 
-// l1, l2是有一个有序数组
+// l1, l2是有一个有序数组；返回同时在两个list中的元素
 // l1 & l2
 func interList(l1 []int, l2 []int) []int {
 	if len(l1) == 0 || len(l2) == 0 {

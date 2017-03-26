@@ -77,6 +77,7 @@ func (n *Node) GetMasterConn() (*BackendConn, error) {
 	return db.GetConn()
 }
 
+// 获取一个Slave? DB的选择很重要
 func (n *Node) GetSlaveConn() (*BackendConn, error) {
 	n.Lock()
 	// 获取下一个Slave
@@ -91,6 +92,8 @@ func (n *Node) GetSlaveConn() (*BackendConn, error) {
 	if db == nil {
 		return nil, errors.ErrNoSlaveDB
 	}
+
+	// Down/ManualDown 都是Down吧?
 	if atomic.LoadInt32(&(db.state)) == Down {
 		return nil, errors.ErrSlaveDown
 	}
@@ -104,6 +107,7 @@ func (n *Node) checkMaster() {
 		golog.Error("Node", "checkMaster", "Master is no alive", 0)
 		return
 	}
+
 	// 定期对数据库进行Ping
 	if err := db.Ping(); err != nil {
 		// Ping失败了，如何处理呢?
@@ -172,7 +176,7 @@ func (n *Node) checkSlave() {
 	}
 
 }
-
+// 添加一个Slave, 添加之后，InitBalancer
 func (n *Node) AddSlave(addr string) error {
 	var db *DB
 	var weight int
@@ -206,6 +210,7 @@ func (n *Node) AddSlave(addr string) error {
 	}
 }
 
+// 删除一个Slave, InitBalancer
 func (n *Node) DeleteSlave(addr string) error {
 	var i int
 	n.Lock()
@@ -249,6 +254,7 @@ func (n *Node) OpenDB(addr string) (*DB, error) {
 	return db, err
 }
 
+// 创建一个UpDB, 不一定能用
 func (n *Node) UpDB(addr string) (*DB, error) {
 	db, err := n.OpenDB(addr)
 
@@ -265,6 +271,7 @@ func (n *Node) UpDB(addr string) (*DB, error) {
 	return db, nil
 }
 
+// 创建一个UpDB, 不一定能用
 func (n *Node) UpMaster(addr string) error {
 	db, err := n.UpDB(addr)
 	if err != nil {
@@ -280,10 +287,11 @@ func (n *Node) UpSlave(addr string) error {
 		golog.Error("Node", "UpSlave", err.Error(), 0)
 	}
 
+	// 写锁定
 	n.Lock()
 	for k, slave := range n.Slave {
 		if slave.addr == addr {
-			n.Slave[k] = db  // 直接替换对应的DB
+			n.Slave[k] = db // 直接替换对应的DB
 			n.Unlock()
 			return nil
 		}
@@ -302,6 +310,7 @@ func (n *Node) DownMaster(addr string, state int32) error {
 		return errors.ErrNoMasterDB
 	}
 
+	// 关闭Master, 设置状态
 	db.Close()
 	atomic.StoreInt32(&(db.state), state)
 	return nil
@@ -318,10 +327,10 @@ func (n *Node) DownSlave(addr string, state int32) error {
 	n.RUnlock()
 
 	//slave is *DB
+	// TODO: Slave挂了之后，如何做Balance呢?
 	for _, slave := range slaves {
 		if slave.addr == addr {
-			// 关闭对应的Slave? 然后呢?
-			// TODO:
+			// 关闭对应的Slave? 然后呢设置状态
 			slave.Close()
 			atomic.StoreInt32(&(slave.state), state)
 			break

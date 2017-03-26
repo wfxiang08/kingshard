@@ -178,15 +178,37 @@ func (c *ClientConn) writePrepare(s *Stmt) error {
 	return nil
 }
 
+// https://dev.mysql.com/doc/internals/en/com-stmt-prepare.html
+// https://dev.mysql.com/doc/internals/en/com-stmt-execute.html
+//
 func (c *ClientConn) handleStmtExecute(data []byte) error {
 	if len(data) < 9 {
 		return mysql.ErrMalformPacket
 	}
 
+//COM_STMT_EXECUTE
+//  execute a prepared statement
+//
+//  direction: client -> server
+//  response: COM_STMT_EXECUTE Response
+//
+//  payload:
+//    1              [17] COM_STMT_EXECUTE
+//    4              stmt-id
+//    1              flags
+//    4              iteration-count
+//      if num-params > 0:
+//    n              NULL-bitmap, length: (num-params+7)/8
+//    1              new-params-bound-flag
+//      if new-params-bound-flag == 1:
+//    n              type of each parameter, length: num-params * 2
+//    n              value of each parameter
+
 	pos := 0
 	id := binary.LittleEndian.Uint32(data[0:4])
 	pos += 4
 
+	// 如果这个statement已经被prepare过了，则直接返回OK
 	s, ok := c.stmts[id]
 	if !ok {
 		return mysql.NewDefaultError(mysql.ER_UNKNOWN_STMT_HANDLER,
@@ -196,6 +218,8 @@ func (c *ClientConn) handleStmtExecute(data []byte) error {
 	flag := data[pos]
 	pos++
 	//now we only support CURSOR_TYPE_NO_CURSOR flag
+	//其他的: CURSOR_TYPE_READ_ONLY 等
+	//
 	if flag != 0 {
 		return mysql.NewError(mysql.ER_UNKNOWN_ERROR, fmt.Sprintf("unsupported flag %d", flag))
 	}
@@ -207,9 +231,11 @@ func (c *ClientConn) handleStmtExecute(data []byte) error {
 	var paramTypes []byte
 	var paramValues []byte
 
+	// 在prepare statement时就确定了
 	paramNum := s.params
 
 	if paramNum > 0 {
+		// BitmapLen 向上取整： (params + 7) / 8
 		nullBitmapLen := (s.params + 7) >> 3
 		if len(data) < (pos + nullBitmapLen + 1) {
 			return mysql.ErrMalformPacket
@@ -217,13 +243,18 @@ func (c *ClientConn) handleStmtExecute(data []byte) error {
 		nullBitmaps = data[pos : pos+nullBitmapLen]
 		pos += nullBitmapLen
 
-		//new param bound flag
+		// new param bound flag
 		if data[pos] == 1 {
 			pos++
 			if len(data) < (pos + (paramNum << 1)) {
 				return mysql.ErrMalformPacket
 			}
 
+			// 这是什么概念呢?
+			// 1. the type as in Protocol::ColumnType
+			// 2. a flag byte which has the highest bit set if the type is unsigned [80]
+			// 每个paramType两个字节的意义
+			//
 			paramTypes = data[pos : pos+(paramNum<<1)]
 			pos += (paramNum << 1)
 
@@ -331,6 +362,10 @@ func (c *ClientConn) handlePrepareExec(stmt sqlparser.Statement, sql string, arg
 	return err
 }
 
+
+//
+// 如何绑定Stmt的参数呢?
+//
 func (c *ClientConn) bindStmtArgs(s *Stmt, nullBitmap, paramTypes, paramValues []byte) error {
 	args := s.args
 
@@ -456,6 +491,7 @@ func (c *ClientConn) bindStmtArgs(s *Stmt, nullBitmap, paramTypes, paramValues [
 	return nil
 }
 
+// 参考: https://dev.mysql.com/doc/internals/en/com-stmt-send-long-data.html
 func (c *ClientConn) handleStmtSendLongData(data []byte) error {
 	if len(data) < 6 {
 		return mysql.ErrMalformPacket
@@ -488,11 +524,13 @@ func (c *ClientConn) handleStmtSendLongData(data []byte) error {
 	return nil
 }
 
+// https://dev.mysql.com/doc/internals/en/com-stmt-close.html
 func (c *ClientConn) handleStmtReset(data []byte) error {
 	if len(data) < 4 {
 		return mysql.ErrMalformPacket
 	}
 
+	// 这里大量使用LittleEndian
 	id := binary.LittleEndian.Uint32(data[0:4])
 
 	s, ok := c.stmts[id]

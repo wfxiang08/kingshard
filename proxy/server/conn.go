@@ -356,16 +356,20 @@ func (c *ClientConn) dispatch(data []byte) error {
 
 	case mysql.COM_FIELD_LIST:
 		return c.handleFieldList(data)
+
 	case mysql.COM_STMT_PREPARE:
 		return c.handleStmtPrepare(hack.String(data))
 	case mysql.COM_STMT_EXECUTE:
+		// 参考: https://dev.mysql.com/doc/internals/en/com-stmt-execute.html
 		return c.handleStmtExecute(data)
 	case mysql.COM_STMT_CLOSE:
+		// 如何关闭Statement呢？
 		return c.handleStmtClose(data)
 	case mysql.COM_STMT_SEND_LONG_DATA:
 		return c.handleStmtSendLongData(data)
 	case mysql.COM_STMT_RESET:
 		return c.handleStmtReset(data)
+
 	case mysql.COM_SET_OPTION:
 		return c.writeEOF(0)
 	default:

@@ -21,6 +21,8 @@ package sqlparser
 import "testing"
 
 func TestGetDBName(t *testing.T) {
+	// 如何从SQL语句中获取tablename?
+	// MySQL内部是否都使用a.b这种模式呢?
 	wantYes := []string{
 		"insert into a.b values(1)",
 		"update a.b set c=1",
@@ -37,6 +39,7 @@ func TestGetDBName(t *testing.T) {
 		}
 	}
 
+	// 没有db qualifier
 	wantNo := []string{
 		"insert into a values(1)",
 		"update a set c=1",
@@ -53,6 +56,7 @@ func TestGetDBName(t *testing.T) {
 		}
 	}
 
+	// 第一句哪儿为有问题呢?
 	wantErr := []string{
 		"select * from a",
 		"syntax error",

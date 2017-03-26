@@ -730,6 +730,7 @@ func (s *Server) UpSlave(node string, addr string) error {
 	return n.UpSlave(addr)
 }
 
+// 手动下线
 func (s *Server) DownMaster(node, masterAddr string) error {
 	n := s.GetNode(node)
 	if n == nil {
@@ -738,6 +739,7 @@ func (s *Server) DownMaster(node, masterAddr string) error {
 	return n.DownMaster(masterAddr, backend.ManualDown)
 }
 
+// 手动下线
 func (s *Server) DownSlave(node, slaveAddr string) error {
 	n := s.GetNode(node)
 	if n == nil {

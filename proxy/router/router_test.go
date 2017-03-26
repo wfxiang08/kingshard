@@ -24,6 +24,7 @@ import (
 	"github.com/flike/kingshard/sqlparser"
 )
 
+// Rule的解析以及测试
 func TestParseRule(t *testing.T) {
 	var s = `
 schema:
@@ -99,6 +100,9 @@ schema:
 	}
 }
 
+// 测试的Router: 存在10个node
+// default?
+//
 func newTestRouter() *Router {
 	var s = `
 schema :
@@ -326,38 +330,62 @@ func isListEqual(l1 []int, l2 []int) bool {
 	return true
 }
 
+// 如何验证Plan呢?
 func checkPlan(t *testing.T, sql string, tableIndexs []int, nodeIndexs []int) {
 	r := newTestRouter()
 	db := "kingshard"
+
+	// 解析stmt
 	stmt, err := sqlparser.Parse(sql)
 	if err != nil {
 		t.Fatal(err.Error())
 	}
+
+	// DB + stmt就也能生成一个plan
 	plan, err := r.BuildPlan(db, stmt)
 	if err != nil {
 		t.Fatal(err.Error())
 	}
 
+	// 需要在哪些表中查询呢? RouteTableIndexs
 	if isListEqual(plan.RouteTableIndexs, tableIndexs) == false {
 		err := fmt.Errorf("RouteTableIndexs=%v but tableIndexs=%v",
 			plan.RouteTableIndexs, tableIndexs)
 		t.Fatal(err.Error())
 	}
+
+	// 需要在哪些Node汇总查询呢?
 	if isListEqual(plan.RouteNodeIndexs, nodeIndexs) == false {
 		err := fmt.Errorf("RouteNodeIndexs=%v but nodeIndexs=%v",
 			plan.RouteNodeIndexs, nodeIndexs)
 		t.Fatal(err.Error())
 	}
-	t.Logf("rewritten_sql=%v", plan.RewrittenSqls)
+
+	fmt.Printf("------------\n")
+	fmt.Printf("ORIGIN: %s\n", sql)
+	for key, sqls := range plan.RewrittenSqls {
+		for _, sql := range sqls {
+			fmt.Printf("New SQL: %s --> %s\n", key, sql)
+		}
+	}
 
 }
+
+//db: kingshard
+//table: test1
+//key: id
+//nodes: [node1,node2,node3]
+//locations: [4,4,4]
+//type: hash
+//
+// go test github.com/flike/kingshard/proxy/router -v -run "TestWhereInPartitionByTableIndex"
 func TestWhereInPartitionByTableIndex(t *testing.T) {
 	var sql string
 	//2016-08-02 13:37:26
 	sql = "select * from test1 where id in (1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22) "
 	checkPlan(t, sql,
-		[]int{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11},
-		[]int{0, 1, 2},
+		[]int{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11}, // 所有的tableIndex: 3个node, 每个node中包含4个table
+		[]int{0, 1, 2},                              // node_index
 	)
 	// ensure no impact for or operator in where
 	sql = "select * from test1 where id in (1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21) or name='test'"
@@ -367,6 +395,7 @@ func TestWhereInPartitionByTableIndex(t *testing.T) {
 	)
 
 	// ensure no impact for not in
+	// 这是什么情况呢?
 	sql = "select * from test1 where id not in (0,1,2,3,4,5,6,7)"
 	checkPlan(t, sql, []int{8, 9, 10, 11}, []int{2})
 

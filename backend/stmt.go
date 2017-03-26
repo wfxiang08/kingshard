@@ -88,6 +88,7 @@ func (s *Stmt) write(args ...interface{}) error {
 
 		newParamBoundFlag = 1
 
+		// 这些类型必须完整匹配? 如果Client传递错误的数据，那么该如何处理呢?
 		switch v := args[i].(type) {
 		case int8:
 			paramTypes[i<<1] = mysql.MYSQL_TYPE_TINY

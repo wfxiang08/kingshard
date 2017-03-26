@@ -174,9 +174,12 @@ func (c *ClientConn) getShardConns(fromSlave bool, plan *router.Plan) (map[strin
 	}
 
 	nodesCount := len(plan.RouteNodeIndexs)
+
 	nodes := make([]*backend.Node, 0, nodesCount)
+
 	for i := 0; i < nodesCount; i++ {
 		nodeIndex := plan.RouteNodeIndexs[i]
+
 		nodes = append(nodes, c.proxy.GetNode(plan.Rule.Nodes[nodeIndex]))
 	}
 	if c.isInTransaction() {
@@ -188,6 +191,7 @@ func (c *ClientConn) getShardConns(fromSlave bool, plan *router.Plan) (map[strin
 			return nil, errors.ErrTransInMulti
 		}
 	}
+
 	conns := make(map[string]*backend.BackendConn)
 	var co *backend.BackendConn
 	for _, n := range nodes {
@@ -202,16 +206,22 @@ func (c *ClientConn) getShardConns(fromSlave bool, plan *router.Plan) (map[strin
 	return conns, err
 }
 
+//
+// 在指定的Node/backend conn上执行对应的SQL
+//
 func (c *ClientConn) executeInNode(conn *backend.BackendConn, sql string, args []interface{}) ([]*mysql.Result, error) {
 	var state string
 	startTime := time.Now().UnixNano()
 	r, err := conn.Execute(sql, args...)
+
 	if err != nil {
 		state = "ERROR"
 	} else {
 		state = "OK"
 	}
 	execTime := float64(time.Now().UnixNano()-startTime) / float64(time.Millisecond)
+
+	// 处理SQL Query
 	if strings.ToLower(c.proxy.logSql[c.proxy.logSqlIndex]) != golog.LogSqlOff &&
 		execTime > float64(c.proxy.slowLogTime[c.proxy.slowLogTimeIndex]) {
 		c.proxy.counter.IncrSlowLogTotal()
@@ -230,7 +240,12 @@ func (c *ClientConn) executeInNode(conn *backend.BackendConn, sql string, args [
 	return []*mysql.Result{r}, err
 }
 
-func (c *ClientConn) executeInMultiNodes(conns map[string]*backend.BackendConn, sqls map[string][]string, args []interface{}) ([]*mysql.Result, error) {
+//
+// sqls: 其中key为node, []string为同一个node内部的不同表的SQL语句
+//
+func (c *ClientConn) executeInMultiNodes(conns map[string]*backend.BackendConn, sqls map[string][]string,
+	args []interface{}) ([]*mysql.Result, error) {
+
 	if len(conns) != len(sqls) {
 		golog.Error("ClientConn", "executeInMultiNodes", errors.ErrConnNotEqual.Error(), c.connectionId,
 			"conns", conns,
@@ -247,6 +262,7 @@ func (c *ClientConn) executeInMultiNodes(conns map[string]*backend.BackendConn, 
 
 	wg.Add(len(conns))
 
+	// 统计所有参与查询的表的个数
 	resultCount := 0
 	for _, sqlSlice := range sqls {
 		resultCount += len(sqlSlice)
@@ -254,11 +270,15 @@ func (c *ClientConn) executeInMultiNodes(conns map[string]*backend.BackendConn, 
 
 	rs := make([]interface{}, resultCount)
 
+	// 执行单个查询
 	f := func(rs []interface{}, i int, execSqls []string, co *backend.BackendConn) {
 		var state string
+		// 在同一个node上，执行多个语句（为什么不并发呢？）
 		for _, v := range execSqls {
 			startTime := time.Now().UnixNano()
 			r, err := co.Execute(v, args...)
+
+			// 不同的人写数组的不同部分是ok的
 			if err != nil {
 				state = "ERROR"
 				rs[i] = err
@@ -266,6 +286,8 @@ func (c *ClientConn) executeInMultiNodes(conns map[string]*backend.BackendConn, 
 				state = "OK"
 				rs[i] = r
 			}
+
+			// 记录SQL的执行时间：慢查询也可以在这个环节来处理
 			execTime := float64(time.Now().UnixNano()-startTime) / float64(time.Millisecond)
 			if c.proxy.logSql[c.proxy.logSqlIndex] != golog.LogSqlOff &&
 				execTime > float64(c.proxy.slowLogTime[c.proxy.slowLogTimeIndex]) {
@@ -282,6 +304,7 @@ func (c *ClientConn) executeInMultiNodes(conns map[string]*backend.BackendConn, 
 		wg.Done()
 	}
 
+	// 并发执行n个请求
 	offsert := 0
 	for nodeName, co := range conns {
 		s := sqls[nodeName] //[]string
@@ -291,6 +314,8 @@ func (c *ClientConn) executeInMultiNodes(conns map[string]*backend.BackendConn, 
 
 	wg.Wait()
 
+	// 合并查询结果
+	// 一个出错，全部出错
 	var err error
 	r := make([]*mysql.Result, resultCount)
 	for i, v := range rs {

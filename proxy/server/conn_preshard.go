@@ -111,7 +111,7 @@ func (c *ClientConn) preHandleShard(sql string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	//execute.sql may be rewritten in getShowExecDB
+	// execute.sql may be rewritten in getShowExecDB
 	rs, err = c.executeInNode(conn, executeDB.sql, nil)
 	if err != nil {
 		return false, err

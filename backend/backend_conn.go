@@ -509,10 +509,12 @@ func (c *Conn) FieldList(table string, wildcard string) ([]*mysql.Field, error) 
 
 // 直接执行Query --> writeCommandStr
 func (c *Conn) exec(query string) (*mysql.Result, error) {
+	// 直接执行Query
 	if err := c.writeCommandStr(mysql.COM_QUERY, query); err != nil {
 		return nil, err
 	}
 
+	// 读取执行的结果
 	return c.readResult(false)
 }
 

@@ -52,15 +52,18 @@ type Rule struct {
 	Table string
 	Key   string
 
-	Type           string
-	Nodes          []string
+	Type  string
+	Nodes []string
+	// 所有的子表的Index
+	// TableToNode 每个子表对应的Node的index
 	SubTableIndexs []int       //SubTableIndexs store all the index of sharding sub-table
 	TableToNode    map[int]int //key is table index, and value is node index
-	Shard          Shard
+	Shard          Shard       // 如何分Shard呢?
 }
 
 type Router struct {
 	//map[db]map[table_name]*Rule
+	// 每一个DB有一个规则集合，每个规则集合下的每个Table有不同的Rule
 	Rules       map[string]map[string]*Rule
 	DefaultRule *Rule
 	Nodes       []string //just for human saw
@@ -70,7 +73,7 @@ func NewDefaultRule(node string) *Rule {
 	var r *Rule = &Rule{
 		Type:        DefaultRuleType,
 		Nodes:       []string{node},
-		Shard:       new(DefaultShard),
+		Shard:       new(DefaultShard), // 默认的Shard算法
 		TableToNode: nil,
 	}
 	return r
@@ -78,10 +81,13 @@ func NewDefaultRule(node string) *Rule {
 
 // 给定的Rule, 如何获取对应的Node
 func (r *Rule) FindNode(key interface{}) (string, error) {
+	// Shard算法能找到tableIndex
 	tableIndex, err := r.Shard.FindForKey(key)
 	if err != nil {
 		return "", err
 	}
+
+	// 再找到node, 然后找到node name
 	nodeIndex := r.TableToNode[tableIndex]
 	return r.Nodes[nodeIndex], nil
 }
@@ -102,12 +108,14 @@ func (r *Rule) FindTableIndex(key interface{}) (int, error) {
 
 //UpdateExprs is the expression after set
 func (r *Rule) checkUpdateExprs(exprs sqlparser.UpdateExprs) error {
+	// UPDATE TABLE xxx SET
 	if r.Type == DefaultRuleType {
 		return nil
 	} else if len(r.Nodes) == 1 {
 		return nil
 	}
 
+	// Update语句中不能更新Key
 	for _, e := range exprs {
 		if string(e.Name.Name) == r.Key {
 			return errors.ErrUpdateKey
@@ -129,6 +137,7 @@ func NewRouter(schemaConfig *config.SchemaConfig) (*Router, error) {
 	rt.DefaultRule = NewDefaultRule(schemaConfig.Default)
 
 	for _, shard := range schemaConfig.ShardRule {
+		// 解析每一个shard
 		for _, node := range shard.Nodes {
 			if !includeNode(rt.Nodes, node) {
 				return nil, fmt.Errorf("shard table[%s] node[%s] not in the schema.nodes list:[%s]",
@@ -195,12 +204,19 @@ func parseRule(cfg *config.ShardConfig) (*Rule, error) {
 	switch r.Type {
 	case HashRuleType, RangeRuleType:
 		var sumTables int
+		// Hash和Range中的Location个数和Nodes必须保持一致
 		if len(cfg.Locations) != len(r.Nodes) {
 			return nil, errors.ErrLocationsCount
 		}
+
+		// 不同的Node, 每个Node对应不同的Locations
 		for i := 0; i < len(cfg.Locations); i++ {
+			// Location[i]什么概念呢?
+			// 存在这么多个分表
 			for j := 0; j < cfg.Locations[i]; j++ {
+				// 子表索引，例如: 0, 1, 2, 3, 4, ..., 11
 				r.SubTableIndexs = append(r.SubTableIndexs, j+sumTables)
+				// 不同的Table所归属的Node可能不一样
 				r.TableToNode[j+sumTables] = i
 			}
 			sumTables += cfg.Locations[i]
@@ -209,11 +225,14 @@ func parseRule(cfg *config.ShardConfig) (*Rule, error) {
 		if len(cfg.DateRange) != len(r.Nodes) {
 			return nil, errors.ErrDateRangeCount
 		}
+
+		// 不同的Node对应不同的DateRange
 		for i := 0; i < len(cfg.DateRange); i++ {
 			dayNumbers, err := ParseDayRange(cfg.DateRange[i])
 			if err != nil {
 				return nil, err
 			}
+
 			for _, v := range dayNumbers {
 				r.SubTableIndexs = append(r.SubTableIndexs, v)
 				r.TableToNode[v] = i
@@ -313,12 +332,16 @@ func (r *Router) BuildPlan(db string, statement sqlparser.Statement) (*Plan, err
 	return nil, errors.ErrNoPlan
 }
 
+//
+// Proxy不支持join操作
+//
 func (r *Router) buildSelectPlan(db string, statement sqlparser.Statement) (*Plan, error) {
 	plan := &Plan{}
 	var where *sqlparser.Where
 	var err error
 	var tableName string
 
+	// SELECT * FROM xxx where id IN (xxx, xxx)
 	stmt := statement.(*sqlparser.Select)
 	switch v := (stmt.From[0]).(type) {
 	case *sqlparser.AliasedTableExpr:
@@ -336,6 +359,7 @@ func (r *Router) buildSelectPlan(db string, statement sqlparser.Statement) (*Pla
 	plan.Rule = r.GetRule(db, tableName) //根据表名获得分表规则
 	where = stmt.Where
 
+	// SELECT * FROM table WHERE id > 100
 	if where != nil {
 		plan.Criteria = where.Expr //路由条件
 		err = plan.calRouteIndexs()
@@ -440,12 +464,15 @@ func (r *Router) buildUpdatePlan(db string, statement sqlparser.Statement) (*Pla
 	return plan, nil
 }
 
+// 删除Plan
 func (r *Router) buildDeletePlan(db string, statement sqlparser.Statement) (*Plan, error) {
 	plan := &Plan{}
 	var where *sqlparser.Where
 	var err error
 
 	stmt := statement.(*sqlparser.Delete)
+
+	// 获取Rule
 	plan.Rule = r.GetRule(db, sqlparser.String(stmt.Table))
 	where = stmt.Where
 
@@ -531,8 +558,10 @@ func (r *Router) buildReplacePlan(db string, statement sqlparser.Statement) (*Pl
 	return plan, nil
 }
 
+// 假定代理不支持Join操作
 //rewrite select sql
 func (r *Router) rewriteSelectSql(plan *Plan, node *sqlparser.Select, tableIndex int) string {
+
 	buf := sqlparser.NewTrackedBuffer(nil)
 	buf.Fprintf("select %v%s",
 		node.Comments,
@@ -543,6 +572,7 @@ func (r *Router) rewriteSelectSql(plan *Plan, node *sqlparser.Select, tableIndex
 	//rewrite select expr
 	for _, expr := range node.SelectExprs {
 		switch v := expr.(type) {
+
 		case *sqlparser.StarExpr:
 			//for shardTable.*,need replace table into shardTable_xxxx.
 			if string(v.TableName) == plan.Rule.Table {
@@ -661,9 +691,14 @@ func (r *Router) rewriteSelectSql(plan *Plan, node *sqlparser.Select, tableIndex
 	return buf.String()
 }
 
+//
+// 如何重新生成Select SQL呢?
+//
 func (r *Router) generateSelectSql(plan *Plan, stmt sqlparser.Statement) error {
 	sqls := make(map[string][]string)
+
 	node, ok := stmt.(*sqlparser.Select)
+
 	if ok == false {
 		return errors.ErrStmtConvert
 	}
@@ -676,12 +711,17 @@ func (r *Router) generateSelectSql(plan *Plan, stmt sqlparser.Statement) error {
 		nodeName := r.Nodes[0]
 		sqls[nodeName] = []string{buf.String()}
 	} else {
+
+		// 有这么多个表，不同的表可能分布在不同的node上
 		tableCount := len(plan.RouteTableIndexs)
 		for i := 0; i < tableCount; i++ {
 			tableIndex := plan.RouteTableIndexs[i]
 			nodeIndex := plan.Rule.TableToNode[tableIndex]
 			nodeName := r.Nodes[nodeIndex]
+
+			// 如何生成面向不同表的SQL呢?
 			selectSql := r.rewriteSelectSql(plan, node, tableIndex)
+
 			if _, ok := sqls[nodeName]; ok == false {
 				sqls[nodeName] = make([]string, 0, tableCount)
 			}

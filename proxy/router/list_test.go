@@ -20,6 +20,7 @@ import (
 )
 
 func testCheckList(t *testing.T, l []int, checkList ...int) {
+	// 两个list的长度必须相同，元素相同
 	if len(l) != len(checkList) {
 		t.Fatal("invalid list len", len(l), len(checkList))
 	}

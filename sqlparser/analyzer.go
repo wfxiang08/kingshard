@@ -53,6 +53,7 @@ func GetDBTable(token string) (string, string) {
 		return "", ""
 	}
 
+	// select * from account.user;
 	vec := strings.SplitN(token, ".", 2)
 	if len(vec) == 2 {
 		return strings.Trim(vec[0], "`"), strings.Trim(vec[1], "`")
@@ -65,7 +66,7 @@ func GetInsertDBTable(token string) (string, string) {
 	if len(token) == 0 {
 		return "", ""
 	}
-
+    // INSERT INTO `account.user`
 	vec := strings.SplitN(token, ".", 2)
 	if len(vec) == 2 {
 		table := strings.Split(vec[1], "(")

@@ -21,6 +21,9 @@ import (
 	"github.com/flike/kingshard/core/errors"
 )
 
+//
+// 获取指定数组的最大公约数
+//
 func Gcd(ary []int) int {
 	var i int
 	min := ary[0]
@@ -50,6 +53,9 @@ func Gcd(ary []int) int {
 	return min
 }
 
+//
+// 计算sum, 然后通过 RoundRobinQ 来按照weight随机选择后端节点
+//
 func (n *Node) InitBalancer() {
 	var sum int
 	n.LastSlaveIndex = 0
@@ -81,7 +87,7 @@ func (n *Node) InitBalancer() {
 	}
 }
 
-// 获取下一个DB?
+// 获取下一个DB
 func (n *Node) GetNextSlave() (*DB, error) {
 	var index int
 	queueLen := len(n.RoundRobinQ)
@@ -98,6 +104,7 @@ func (n *Node) GetNextSlave() (*DB, error) {
 	// 获取一个Index
 	n.LastSlaveIndex = n.LastSlaveIndex % queueLen
 	index = n.RoundRobinQ[n.LastSlaveIndex]
+
 	if len(n.Slave) <= index {
 		return nil, errors.ErrNoDatabase
 	}

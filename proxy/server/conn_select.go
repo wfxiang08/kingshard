@@ -103,6 +103,8 @@ func (c *ClientConn) handleSelect(stmt *sqlparser.Select, args []interface{}) er
 	if err != nil {
 		return err
 	}
+
+	// 识别comment
 	if 0 < len(stmt.Comments) {
 		comment := string(stmt.Comments[0])
 		if 0 < len(comment) && strings.ToLower(comment) == MasterComment {
@@ -110,11 +112,14 @@ func (c *ClientConn) handleSelect(stmt *sqlparser.Select, args []interface{}) er
 		}
 	}
 
+	// 获取多个conns
 	conns, err := c.getShardConns(fromSlave, plan)
 	if err != nil {
 		golog.Error("ClientConn", "handleSelect", err.Error(), c.connectionId)
 		return err
 	}
+
+	// 如果没有conns, 则返回空结果
 	if conns == nil {
 		r := c.newEmptyResultset(stmt)
 		return c.writeResultset(c.status, r)
