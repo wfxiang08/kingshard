@@ -20,6 +20,7 @@ import (
 
 	"strings"
 
+	"fmt"
 	"github.com/flike/kingshard/core/errors"
 	"github.com/flike/kingshard/core/golog"
 	"github.com/flike/kingshard/sqlparser"
@@ -62,9 +63,11 @@ func (plan *Plan) notList(l []int) []int {
 	return differentList(plan.Rule.SubTableIndexs, l)
 }
 
+// 如何根据表达式获取Indexs呢？
 func (plan *Plan) getTableIndexs(expr sqlparser.BoolExpr) ([]int, error) {
 	switch plan.Rule.Type {
 	case HashRuleType:
+		// 如何处理hashRule呢?
 		return plan.getHashShardTableIndex(expr)
 	case RangeRuleType:
 		return plan.getRangeShardTableIndex(expr)
@@ -77,6 +80,10 @@ func (plan *Plan) getTableIndexs(expr sqlparser.BoolExpr) ([]int, error) {
 }
 
 //Get the table index of hash shard type
+
+//
+// 先只考虑 HashShard的情况
+//
 func (plan *Plan) getHashShardTableIndex(expr sqlparser.BoolExpr) ([]int, error) {
 	var index int
 	var err error
@@ -93,16 +100,21 @@ func (plan *Plan) getHashShardTableIndex(expr sqlparser.BoolExpr) ([]int, error)
 				return nil, err
 			}
 			return []int{index}, nil
-		case "<", "<=", ">", ">=":
+		case "<", "<=", ">", ">=", "not in":
+			// Hash是无序的，
 			return plan.Rule.SubTableIndexs, nil
 		case "in":
+			// 如何理解In呢?
 			return plan.getTableIndexsByTuple(criteria.Right)
-		case "not in":
-			l, err := plan.getTableIndexsByTuple(criteria.Right)
-			if err != nil {
-				return nil, err
-			}
-			return plan.notList(l), nil
+			//case "not in":
+			//	// 不在指定的Id集合中，并不能排除这些id对应的table index
+			//	l, err := plan.getTableIndexsByTuple(criteria.Right)
+			//	if err != nil {
+			//		return nil, err
+			//	}
+			//	golog.Warn("PlanBuilder", "getHashShardTableIndex", "not in process error", 0)
+			//	// TODO:
+			//	return plan.notList(l), nil
 		}
 	case *sqlparser.RangeCond: //between ... and ...
 		return plan.Rule.SubTableIndexs, nil
@@ -292,6 +304,8 @@ func (plan *Plan) calRouteIndexs() error {
 
 	// 默认是没有shard的
 	if plan.Rule.Type == DefaultRuleType {
+		// 如果不分区，则直接返回第0个Node
+		// RouteTableIndexs 为空
 		plan.RouteNodeIndexs = []int{0}
 		return nil
 	}
@@ -304,8 +318,12 @@ func (plan *Plan) calRouteIndexs() error {
 		}
 	}
 
+	//
+	// plan.Criteria = where.Expr 如何理解呢?
+	//
 	switch criteria := plan.Criteria.(type) {
 	case sqlparser.Values: //代表insert中values
+		fmt.Printf("case sqlparser.Values\n")
 		plan.RouteTableIndexs, err = plan.getInsertTableIndex(criteria)
 		if err != nil {
 			return err
@@ -313,13 +331,19 @@ func (plan *Plan) calRouteIndexs() error {
 		plan.RouteNodeIndexs = plan.TindexsToNindexs(plan.RouteTableIndexs)
 		return nil
 	case sqlparser.BoolExpr:
+		// 例如: id in (1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22)
+		fmt.Printf("case sqlparser.BoolExpr\n")
 		plan.RouteTableIndexs, err = plan.getTableIndexByBoolExpr(criteria)
 		if err != nil {
 			return err
 		}
+
+		// TableIndex --> NodeIndexs简单
 		plan.RouteNodeIndexs = plan.TindexsToNindexs(plan.RouteTableIndexs)
 		return nil
 	default:
+		// 其他情况，直接所有的table一起搜索
+		fmt.Printf("case default\n")
 		plan.RouteTableIndexs = plan.Rule.SubTableIndexs
 		plan.RouteNodeIndexs = makeList(0, nodesCount)
 		return nil
@@ -369,6 +393,7 @@ func (plan *Plan) getValueType(valExpr sqlparser.ValExpr) int {
 func (plan *Plan) getTableIndexByBoolExpr(node sqlparser.BoolExpr) ([]int, error) {
 	switch node := node.(type) {
 	case *sqlparser.AndExpr:
+		fmt.Printf("case *sqlparser.AndExpr\n")
 		left, err := plan.getTableIndexByBoolExpr(node.Left)
 		if err != nil {
 			return nil, err
@@ -379,6 +404,7 @@ func (plan *Plan) getTableIndexByBoolExpr(node sqlparser.BoolExpr) ([]int, error
 		}
 		return interList(left, right), nil
 	case *sqlparser.OrExpr:
+		fmt.Printf("case *sqlparser.OrExpr\n")
 		left, err := plan.getTableIndexByBoolExpr(node.Left)
 		if err != nil {
 			return nil, err
@@ -389,8 +415,11 @@ func (plan *Plan) getTableIndexByBoolExpr(node sqlparser.BoolExpr) ([]int, error
 		}
 		return unionList(left, right), nil
 	case *sqlparser.ParenBoolExpr: //加上括号的BoolExpr，node.Expr去掉了括号
+		fmt.Printf("case *sqlparser.ParenBoolExpr\n")
 		return plan.getTableIndexByBoolExpr(node.Expr)
 	case *sqlparser.ComparisonExpr:
+		// 例如: id in (1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22)
+		fmt.Printf("case *sqlparser.ComparisonExpr\n")
 		switch {
 		case sqlparser.StringIn(node.Operator, "=", "<", ">", "<=", ">=", "<=>"):
 			left := plan.getValueType(node.Left)
@@ -399,9 +428,11 @@ func (plan *Plan) getTableIndexByBoolExpr(node sqlparser.BoolExpr) ([]int, error
 				return plan.getTableIndexs(node)
 			}
 		case sqlparser.StringIn(node.Operator, "in", "not in"):
+			// 如何处理in, not in呢?
 			left := plan.getValueType(node.Left)
 			right := plan.getValueType(node.Right)
 			if left == EID_NODE && right == LIST_NODE {
+				// 只处理in节点
 				if strings.EqualFold(node.Operator, "in") { //only deal with in expr, it's impossible to process not in here.
 					plan.InRightToReplace = node
 				}
@@ -409,6 +440,7 @@ func (plan *Plan) getTableIndexByBoolExpr(node sqlparser.BoolExpr) ([]int, error
 			}
 		}
 	case *sqlparser.RangeCond:
+		fmt.Printf("case *sqlparser.RangeCond\n")
 		left := plan.getValueType(node.Left)
 		from := plan.getValueType(node.From)
 		to := plan.getValueType(node.To)
@@ -416,16 +448,22 @@ func (plan *Plan) getTableIndexByBoolExpr(node sqlparser.BoolExpr) ([]int, error
 			return plan.getTableIndexs(node)
 		}
 	}
+
+	fmt.Printf("case other\n")
 	return plan.Rule.SubTableIndexs, nil
 }
 
-//获得(12,14,23)对应的table index
+//
+//给定ValTuple，计算: SubTableValueGroups, 并返回 shardlist
+//
 func (plan *Plan) getTableIndexsByTuple(valExpr sqlparser.ValExpr) ([]int, error) {
 	shardset := make(map[int]sqlparser.ValTuple)
+
 	switch node := valExpr.(type) {
 	case sqlparser.ValTuple:
 		for _, n := range node {
 			//n.Format()
+			// 获取每一个节点的Table Index
 			index, err := plan.getTableIndexByValue(n)
 
 			if err != nil {
@@ -437,10 +475,15 @@ func (plan *Plan) getTableIndexsByTuple(valExpr sqlparser.ValExpr) ([]int, error
 				valExprs = make([]sqlparser.ValExpr, 0)
 			}
 			valExprs = append(valExprs, n)
+
+			// 记录每一个table上有哪些id
 			shardset[index] = valExprs
 		}
 	}
+
 	plan.SubTableValueGroups = shardset
+
+	// 取出shardset中的keys
 	shardlist := make([]int, len(shardset))
 	index := 0
 	for k := range shardset {
@@ -448,6 +491,7 @@ func (plan *Plan) getTableIndexsByTuple(valExpr sqlparser.ValExpr) ([]int, error
 		index++
 	}
 
+	// 按照升序排列
 	sort.Ints(shardlist)
 	return shardlist, nil
 }
@@ -625,7 +669,7 @@ func makeBetweenList(start, end int, indexs []int) []int {
 	return nil
 }
 
-// l1, l2是有一个有序数组；返回同时在两个list中的元素
+// l1, l2是有一个有序数组；返回同时在两个list
 // l1 & l2
 func interList(l1 []int, l2 []int) []int {
 	if len(l1) == 0 || len(l2) == 0 {

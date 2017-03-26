@@ -356,27 +356,34 @@ func (r *Router) buildSelectPlan(db string, statement sqlparser.Statement) (*Pla
 		tableName = sqlparser.String(v)
 	}
 
+	fmt.Printf("TableName: %s\n", tableName)
+
 	plan.Rule = r.GetRule(db, tableName) //根据表名获得分表规则
 	where = stmt.Where
 
 	// SELECT * FROM table WHERE id > 100
 	if where != nil {
+		// fmt.Printf("where: %v\n", where.Expr)
 		plan.Criteria = where.Expr //路由条件
 		err = plan.calRouteIndexs()
+
 		if err != nil {
 			golog.Error("Route", "BuildSelectPlan", err.Error(), 0)
 			return nil, err
 		}
 	} else {
+		// 如果没有限定条件，则查询扩展到所有的Table上来执行
 		//if shard select without where,send to all nodes and all tables
 		plan.RouteTableIndexs = plan.Rule.SubTableIndexs
 		plan.RouteNodeIndexs = makeList(0, len(plan.Rule.Nodes))
 	}
 
+	// 如果没有字表，并且存在非默认的Rule规则，则出错了
 	if plan.Rule.Type != DefaultRuleType && len(plan.RouteTableIndexs) == 0 {
 		golog.Error("Route", "BuildSelectPlan", errors.ErrNoCriteria.Error(), 0)
 		return nil, errors.ErrNoCriteria
 	}
+
 	//generate sql,如果routeTableindexs为空则表示不分表，不分表则发default node
 	err = r.generateSelectSql(plan, stmt)
 	if err != nil {
