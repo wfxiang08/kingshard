@@ -27,7 +27,7 @@ import (
 )
 
 const (
-	EID_NODE = iota
+	EID_NODE = iota // id, value, list, 其他
 	VALUE_NODE
 	LIST_NODE
 	OTHER_NODE
@@ -44,8 +44,8 @@ type Plan struct {
 
 	SubTableValueGroups map[int]sqlparser.ValTuple //按照tableIndex存放ValueExpr
 	InRightToReplace    *sqlparser.ComparisonExpr  //记录in的右边Expr,用来动态替换不同table in的值
-	RouteTableIndexs    []int
-	RouteNodeIndexs     []int
+	RouteTableIndexs    []int                      // 记录Table的Index
+	RouteNodeIndexs     []int                      // 记录Node的Index
 	RewrittenSqls       map[string][]string
 }
 
@@ -59,6 +59,7 @@ func (plan *Plan) rewriteWhereIn(tableIndex int) (sqlparser.ValExpr, error) {
 	return oldright, nil
 }
 
+// 返回在: SubTableIndexs, 但是不在: l中的数据
 func (plan *Plan) notList(l []int) []int {
 	return differentList(plan.Rule.SubTableIndexs, l)
 }
@@ -74,6 +75,7 @@ func (plan *Plan) getTableIndexs(expr sqlparser.BoolExpr) ([]int, error) {
 	case DateYearRuleType, DateMonthRuleType, DateDayRuleType:
 		return plan.getDateShardTableIndex(expr)
 	default:
+		// 其他为定义的Rule
 		return plan.Rule.SubTableIndexs, nil
 	}
 	return nil, nil
@@ -90,6 +92,8 @@ func (plan *Plan) getHashShardTableIndex(expr sqlparser.BoolExpr) ([]int, error)
 	switch criteria := expr.(type) {
 	case *sqlparser.ComparisonExpr:
 		switch criteria.Operator {
+		// https://dev.mysql.com/doc/refman/5.7/en/comparison-operators.html#operator_equal-to
+		// <=> NULL safe operator
 		case "=", "<=>": //=对应的分片
 			if plan.getValueType(criteria.Left) == EID_NODE {
 				index, err = plan.getTableIndexByValue(criteria.Right)
@@ -101,7 +105,7 @@ func (plan *Plan) getHashShardTableIndex(expr sqlparser.BoolExpr) ([]int, error)
 			}
 			return []int{index}, nil
 		case "<", "<=", ">", ">=", "not in":
-			// Hash是无序的，
+			// HashShard时, not in起到的作用很小，因此也不做特殊处理
 			return plan.Rule.SubTableIndexs, nil
 		case "in":
 			// 如何理解In呢?
