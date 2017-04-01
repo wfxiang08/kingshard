@@ -371,7 +371,7 @@ func (r *Router) buildSelectPlan(db string, statement sqlparser.Statement) (*Pla
 		tableName = sqlparser.String(v)
 	}
 
-	fmt.Printf("TableName: %s\n", tableName)
+	// fmt.Printf("TableName: %s\n", tableName)
 
 	plan.Rule = r.GetRule(db, tableName) //根据表名获得分表规则
 	where = stmt.Where
