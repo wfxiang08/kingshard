@@ -23,7 +23,7 @@ import (
 
 	"github.com/flike/kingshard/config"
 	"github.com/flike/kingshard/core/errors"
-	"github.com/flike/kingshard/core/golog"
+	log "github.com/wfxiang08/cyutils/utils/rolling_log"
 )
 
 const (
@@ -104,18 +104,18 @@ func (n *Node) GetSlaveConn() (*BackendConn, error) {
 func (n *Node) checkMaster() {
 	db := n.Master
 	if db == nil {
-		golog.Error("Node", "checkMaster", "Master is no alive", 0)
+		log.Errorf("Node: checkMaster Master is not alive")
 		return
 	}
 
 	// 定期对数据库进行Ping
 	if err := db.Ping(); err != nil {
 		// Ping失败了，如何处理呢?
-		golog.Error("Node", "checkMaster", "Ping", 0, "db.Addr", db.Addr(), "error", err.Error())
+		log.ErrorErrorf(err, "Node: checkMaster ping db.Addr: %s", db.Addr())
 	} else {
 		// ping成功了，则更新状态
 		if atomic.LoadInt32(&(db.state)) == Down {
-			golog.Info("Node", "checkMaster", "Master up", 0, "db.Addr", db.Addr())
+			log.ErrorErrorf(err, "Node: checkMaster Master up db.Addr: %s", db.Addr())
 			n.UpMaster(db.addr)
 		}
 		db.SetLastPing()
@@ -127,9 +127,7 @@ func (n *Node) checkMaster() {
 
 	// 标记Master数据库挂了
 	if int64(n.DownAfterNoAlive) > 0 && time.Now().Unix()-db.GetLastPing() > int64(n.DownAfterNoAlive/time.Second) {
-		golog.Info("Node", "checkMaster", "Master down", 0,
-			"db.Addr", db.Addr(),
-			"Master_down_time", int64(n.DownAfterNoAlive/time.Second))
+		log.Printf("Node: checkMaster Master down db.Addr: %s, Master_down_time: %d", db.Addr(), int64(n.DownAfterNoAlive/time.Second))
 		n.DownMaster(db.addr, Down)
 	}
 }
@@ -148,11 +146,11 @@ func (n *Node) checkSlave() {
 
 	for i := 0; i < len(slaves); i++ {
 		if err := slaves[i].Ping(); err != nil {
-			golog.Error("Node", "checkSlave", "Ping", 0, "db.Addr", slaves[i].Addr(), "error", err.Error())
+			log.ErrorErrorf(err, "Node checkSlave, Ping: %s", slaves[i].Addr())
 		} else {
 			// 如果OK, 则启动DB
 			if atomic.LoadInt32(&(slaves[i].state)) == Down {
-				golog.Info("Node", "checkSlave", "Slave up", 0, "db.Addr", slaves[i].Addr())
+				log.Printf("Node checkSlave, Slave up: %s", slaves[i].Addr())
 				n.UpSlave(slaves[i].addr)
 			}
 			slaves[i].SetLastPing()
@@ -163,11 +161,8 @@ func (n *Node) checkSlave() {
 		}
 
 		if int64(n.DownAfterNoAlive) > 0 && time.Now().Unix()-slaves[i].GetLastPing() > int64(n.DownAfterNoAlive/time.Second) {
-			golog.Info("Node", "checkSlave", "Slave down", 0,
-				"db.Addr", slaves[i].Addr(),
-				"slave_down_time", int64(n.DownAfterNoAlive/time.Second))
-			//If can't ping slave after DownAfterNoAlive, set slave Down
 
+			log.Printf("Node checkSlave, Slave down: %s, slave_down_time: %d", slaves[i].Addr(), int64(n.DownAfterNoAlive/time.Second))
 			//
 			//TODO: 为什么不直接传递slaves[i]呢?
 			//
@@ -176,6 +171,7 @@ func (n *Node) checkSlave() {
 	}
 
 }
+
 // 添加一个Slave, 添加之后，InitBalancer
 func (n *Node) AddSlave(addr string) error {
 	var db *DB
@@ -275,7 +271,7 @@ func (n *Node) UpDB(addr string) (*DB, error) {
 func (n *Node) UpMaster(addr string) error {
 	db, err := n.UpDB(addr)
 	if err != nil {
-		golog.Error("Node", "UpMaster", err.Error(), 0)
+		log.ErrorErrorf(err, "Node UpMaster")
 	}
 	n.Master = db
 	return err
@@ -284,7 +280,7 @@ func (n *Node) UpMaster(addr string) error {
 func (n *Node) UpSlave(addr string) error {
 	db, err := n.UpDB(addr)
 	if err != nil {
-		golog.Error("Node", "UpSlave", err.Error(), 0)
+		log.ErrorErrorf(err, "Node UpSlave")
 	}
 
 	// 写锁定

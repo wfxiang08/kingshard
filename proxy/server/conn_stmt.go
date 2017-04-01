@@ -22,9 +22,9 @@ import (
 	"strings"
 
 	"github.com/flike/kingshard/core/errors"
-	"github.com/flike/kingshard/core/golog"
 	"github.com/flike/kingshard/mysql"
 	"github.com/flike/kingshard/sqlparser"
+	"github.com/wfxiang08/cyutils/utils/rolling_log"
 )
 
 var paramFieldData []byte
@@ -186,23 +186,23 @@ func (c *ClientConn) handleStmtExecute(data []byte) error {
 		return mysql.ErrMalformPacket
 	}
 
-//COM_STMT_EXECUTE
-//  execute a prepared statement
-//
-//  direction: client -> server
-//  response: COM_STMT_EXECUTE Response
-//
-//  payload:
-//    1              [17] COM_STMT_EXECUTE
-//    4              stmt-id
-//    1              flags
-//    4              iteration-count
-//      if num-params > 0:
-//    n              NULL-bitmap, length: (num-params+7)/8
-//    1              new-params-bound-flag
-//      if new-params-bound-flag == 1:
-//    n              type of each parameter, length: num-params * 2
-//    n              value of each parameter
+	//COM_STMT_EXECUTE
+	//  execute a prepared statement
+	//
+	//  direction: client -> server
+	//  response: COM_STMT_EXECUTE Response
+	//
+	//  payload:
+	//    1              [17] COM_STMT_EXECUTE
+	//    4              stmt-id
+	//    1              flags
+	//    4              iteration-count
+	//      if num-params > 0:
+	//    n              NULL-bitmap, length: (num-params+7)/8
+	//    1              new-params-bound-flag
+	//      if new-params-bound-flag == 1:
+	//    n              type of each parameter, length: num-params * 2
+	//    n              value of each parameter
 
 	pos := 0
 	id := binary.LittleEndian.Uint32(data[0:4])
@@ -310,7 +310,7 @@ func (c *ClientConn) handlePrepareSelect(stmt *sqlparser.Select, sql string, arg
 	var rs []*mysql.Result
 	rs, err = c.executeInNode(conn, sql, args)
 	if err != nil {
-		golog.Error("ClientConn", "handlePrepareSelect", err.Error(), c.connectionId)
+		rolling_log.ErrorErrorf(err, "ClientConn handlePrepareSelect: %d", c.connectionId)
 		return err
 	}
 
@@ -348,7 +348,7 @@ func (c *ClientConn) handlePrepareExec(stmt sqlparser.Statement, sql string, arg
 	c.closeConn(conn, false)
 
 	if err != nil {
-		golog.Error("ClientConn", "handlePrepareExec", err.Error(), c.connectionId)
+		rolling_log.ErrorErrorf(err, "ClientConn handlePrepareExec: %d", c.connectionId)
 		return err
 	}
 
@@ -361,7 +361,6 @@ func (c *ClientConn) handlePrepareExec(stmt sqlparser.Statement, sql string, arg
 
 	return err
 }
-
 
 //
 // 如何绑定Stmt的参数呢?

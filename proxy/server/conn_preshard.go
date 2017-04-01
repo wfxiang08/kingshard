@@ -20,11 +20,11 @@ import (
 
 	"github.com/flike/kingshard/backend"
 	"github.com/flike/kingshard/core/errors"
-	"github.com/flike/kingshard/core/golog"
 	"github.com/flike/kingshard/core/hack"
 	"github.com/flike/kingshard/mysql"
 	"github.com/flike/kingshard/proxy/router"
 	"github.com/flike/kingshard/sqlparser"
+	"github.com/wfxiang08/cyutils/utils/rolling_log"
 )
 
 type ExecuteDB struct {
@@ -61,11 +61,8 @@ func (c *ClientConn) preHandleShard(sql string) (bool, error) {
 	if c.proxy.blacklistSqls[c.proxy.blacklistSqlsIndex].sqlsLen != 0 {
 		// 如果Blacklist，则返回
 		if c.isBlacklistSql(sql) {
-			golog.OutputSql("Forbidden", "%s->%s:%s",
-				c.c.RemoteAddr(),
-				c.proxy.addr,
-				sql,
-			)
+			rolling_log.Printf("Forbidden: %s->%s:%s", c.c.RemoteAddr(),
+				c.proxy.addr, sql)
 			err := mysql.NewError(mysql.ER_UNKNOWN_ERROR, "sql in blacklist.")
 			return false, err
 		}
@@ -102,7 +99,6 @@ func (c *ClientConn) preHandleShard(sql string) (bool, error) {
 		return false, nil
 	}
 
-
 	//作为Proxy需要将请求转发给后端!!!!
 	//get connection in DB
 	conn, err := c.getBackendConn(executeDB.ExecNode, executeDB.IsSlave)
@@ -119,7 +115,7 @@ func (c *ClientConn) preHandleShard(sql string) (bool, error) {
 
 	if len(rs) == 0 {
 		msg := fmt.Sprintf("result is empty")
-		golog.Error("ClientConn", "handleUnsupport", msg, 0, "sql", sql)
+		rolling_log.Errorf("ClientConn handleUnsupport: %s, sql: %s", msg, sql)
 		return false, mysql.NewError(mysql.ER_UNKNOWN_ERROR, msg)
 	}
 

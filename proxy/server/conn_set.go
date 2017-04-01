@@ -20,9 +20,9 @@ import (
 	"time"
 
 	"github.com/flike/kingshard/backend"
-	"github.com/flike/kingshard/core/golog"
 	"github.com/flike/kingshard/mysql"
 	"github.com/flike/kingshard/sqlparser"
+	"github.com/wfxiang08/cyutils/utils/rolling_log"
 )
 
 var nstring = sqlparser.String
@@ -42,15 +42,13 @@ func (c *ClientConn) handleSet(stmt *sqlparser.Set, sql string) (err error) {
 			state = "OK"
 		}
 		execTime := float64(time.Now().UnixNano()-startTime) / float64(time.Millisecond)
-		if c.proxy.logSql[c.proxy.logSqlIndex] != golog.LogSqlOff &&
-			execTime > float64(c.proxy.slowLogTime[c.proxy.slowLogTimeIndex]) {
+		if execTime > float64(c.proxy.slowLogTime[c.proxy.slowLogTimeIndex]) {
 			c.proxy.counter.IncrSlowLogTotal()
-			golog.OutputSql(state, "%.1fms - %s->%s:%s",
-				execTime,
+			rolling_log.Printf("State: %s, %.1fms - %s->%s:%s", state, execTime,
 				c.c.RemoteAddr(),
 				c.proxy.addr,
-				sql,
-			)
+				sql)
+
 		}
 
 	}()
@@ -69,8 +67,7 @@ func (c *ClientConn) handleSet(stmt *sqlparser.Set, sql string) (err error) {
 		}
 		return c.handleSetNames(stmt.Exprs[0].Expr, nil)
 	default:
-		golog.Error("ClientConn", "handleSet", "command not supported",
-			c.connectionId, "sql", sql)
+		rolling_log.ErrorErrorf(err, "ClientConn handleSelect: %d command not supported, sql: %s", c.connectionId, sql)
 		return c.writeOK(nil)
 	}
 }

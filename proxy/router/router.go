@@ -16,17 +16,17 @@ package router
 
 import (
 	"fmt"
-	"strings"
-
 	"github.com/flike/kingshard/config"
 	"github.com/flike/kingshard/core/errors"
-	"github.com/flike/kingshard/core/golog"
 	"github.com/flike/kingshard/sqlparser"
+	log "github.com/wfxiang08/cyutils/utils/rolling_log"
+	"strings"
 )
 
 var (
 	DefaultRuleType   = "default"
 	HashRuleType      = "hash"
+	SMRuleType        = "sm"
 	RangeRuleType     = "range"
 	DateYearRuleType  = "date_year"
 	DateMonthRuleType = "date_month"
@@ -50,7 +50,7 @@ var (
 type Rule struct {
 	DB    string
 	Table string
-	Key   string
+	Keys  []string // 允许指定多个Keys, 只有Keys[0]是主键，其他的Keys和Keys[0]具有相同的Sharding规则
 
 	Type  string
 	Nodes []string
@@ -117,11 +117,20 @@ func (r *Rule) checkUpdateExprs(exprs sqlparser.UpdateExprs) error {
 
 	// Update语句中不能更新Key
 	for _, e := range exprs {
-		if string(e.Name.Name) == r.Key {
+		if listContains(string(e.Name.Name), r.Keys) {
 			return errors.ErrUpdateKey
 		}
 	}
 	return nil
+}
+
+func listContains(name string, keys []string) bool {
+	for i := 0; i < len(keys); i++ {
+		if keys[i] == name {
+			return true
+		}
+	}
+	return false
 }
 
 //NewRouter build router according to the config file
@@ -196,13 +205,16 @@ func parseRule(cfg *config.ShardConfig) (*Rule, error) {
 	r := new(Rule)
 	r.DB = cfg.DB
 	r.Table = cfg.Table
-	r.Key = strings.ToLower(cfg.Key) //ignore case
+	r.Keys = nil
+	for i := 0; i < len(cfg.Keys); i++ {
+		r.Keys = append(r.Keys, strings.ToLower(cfg.Keys[i])) //ignore case
+	}
 	r.Type = cfg.Type
 	r.Nodes = cfg.Nodes //将ruleconfig中的nodes赋值给rule
 	r.TableToNode = make(map[int]int, 0)
 
 	switch r.Type {
-	case HashRuleType, RangeRuleType:
+	case HashRuleType, SMRuleType, RangeRuleType:
 		var sumTables int
 		// Hash和Range中的Location个数和Nodes必须保持一致
 		if len(cfg.Locations) != len(r.Nodes) {
@@ -279,6 +291,9 @@ func parseShard(r *Rule, cfg *config.ShardConfig) error {
 	switch r.Type {
 	case HashRuleType:
 		r.Shard = &HashShard{ShardNum: len(r.TableToNode)}
+	case SMRuleType:
+		// 我们自己的Sharding算法
+		r.Shard = &SMHashShard{ShardNum: len(r.TableToNode)}
 	case RangeRuleType:
 		rs, err := ParseNumSharding(cfg.Locations, cfg.TableRowLimit)
 		if err != nil {
@@ -368,7 +383,7 @@ func (r *Router) buildSelectPlan(db string, statement sqlparser.Statement) (*Pla
 		err = plan.calRouteIndexs()
 
 		if err != nil {
-			golog.Error("Route", "BuildSelectPlan", err.Error(), 0)
+			log.ErrorErrorf(err, "Route BuildSelectPlan")
 			return nil, err
 		}
 	} else {
@@ -380,7 +395,7 @@ func (r *Router) buildSelectPlan(db string, statement sqlparser.Statement) (*Pla
 
 	// 如果没有字表，并且存在非默认的Rule规则，则出错了
 	if plan.Rule.Type != DefaultRuleType && len(plan.RouteTableIndexs) == 0 {
-		golog.Error("Route", "BuildSelectPlan", errors.ErrNoCriteria.Error(), 0)
+		log.ErrorErrorf(errors.ErrNoCriteria, "Route BuildSelectPlan")
 		return nil, errors.ErrNoCriteria
 	}
 
@@ -423,7 +438,7 @@ func (r *Router) buildInsertPlan(db string, statement sqlparser.Statement) (*Pla
 
 	err = plan.calRouteIndexs()
 	if err != nil {
-		golog.Error("Route", "BuildInsertPlan", err.Error(), 0)
+		log.ErrorErrorf(err, "Route BuildInsertPlan")
 		return nil, err
 	}
 
@@ -450,7 +465,7 @@ func (r *Router) buildUpdatePlan(db string, statement sqlparser.Statement) (*Pla
 		plan.Criteria = where.Expr //路由条件
 		err = plan.calRouteIndexs()
 		if err != nil {
-			golog.Error("Route", "BuildUpdatePlan", err.Error(), 0)
+			log.ErrorErrorf(err, "Route BuildUpdatePlan")
 			return nil, err
 		}
 	} else {
@@ -460,7 +475,7 @@ func (r *Router) buildUpdatePlan(db string, statement sqlparser.Statement) (*Pla
 	}
 
 	if plan.Rule.Type != DefaultRuleType && len(plan.RouteTableIndexs) == 0 {
-		golog.Error("Route", "BuildUpdatePlan", errors.ErrNoCriteria.Error(), 0)
+		log.ErrorErrorf(errors.ErrNoCriteria, "Route BuildUpdatePlan")
 		return nil, errors.ErrNoCriteria
 	}
 	//generate sql,如果routeTableindexs为空则表示不分表，不分表则发default node
@@ -487,7 +502,7 @@ func (r *Router) buildDeletePlan(db string, statement sqlparser.Statement) (*Pla
 		plan.Criteria = where.Expr //路由条件
 		err = plan.calRouteIndexs()
 		if err != nil {
-			golog.Error("Route", "BuildUpdatePlan", err.Error(), 0)
+			log.ErrorErrorf(err, "Route BuildUpdatePlan")
 			return nil, err
 		}
 	} else {
@@ -497,7 +512,7 @@ func (r *Router) buildDeletePlan(db string, statement sqlparser.Statement) (*Pla
 	}
 
 	if plan.Rule.Type != DefaultRuleType && len(plan.RouteTableIndexs) == 0 {
-		golog.Error("Route", "BuildDeletePlan", errors.ErrNoCriteria.Error(), 0)
+		log.ErrorErrorf(errors.ErrNoCriteria, "Route BuildDeletePlan")
 		return nil, errors.ErrNoCriteria
 	}
 	//generate sql,如果routeTableindexs为空则表示不分表，不分表则发default node
@@ -519,7 +534,7 @@ func (r *Router) buildTruncatePlan(db string, statement sqlparser.Statement) (*P
 	plan.RouteNodeIndexs = makeList(0, len(plan.Rule.Nodes))
 
 	if plan.Rule.Type != DefaultRuleType && len(plan.RouteTableIndexs) == 0 {
-		golog.Error("Route", "buildTruncatePlan", errors.ErrNoCriteria.Error(), 0)
+		log.ErrorErrorf(errors.ErrNoCriteria, "Route buildTruncatePlan")
 		return nil, errors.ErrNoCriteria
 	}
 	//generate sql,如果routeTableindexs为空则表示不分表，不分表则发default node
@@ -554,7 +569,7 @@ func (r *Router) buildReplacePlan(db string, statement sqlparser.Statement) (*Pl
 
 	err = plan.calRouteIndexs()
 	if err != nil {
-		golog.Error("Route", "BuildReplacePlan", err.Error(), 0)
+		log.ErrorErrorf(err, "Route BuildReplacePlan")
 		return nil, err
 	}
 
@@ -717,6 +732,7 @@ func (r *Router) generateSelectSql(plan *Plan, stmt sqlparser.Statement) error {
 		stmt.Format(buf)
 		nodeName := r.Nodes[0]
 		sqls[nodeName] = []string{buf.String()}
+		log.Infof("Router %s", buf.String())
 	} else {
 
 		// 有这么多个表，不同的表可能分布在不同的node上
@@ -732,6 +748,8 @@ func (r *Router) generateSelectSql(plan *Plan, stmt sqlparser.Statement) error {
 			if _, ok := sqls[nodeName]; ok == false {
 				sqls[nodeName] = make([]string, 0, tableCount)
 			}
+
+			log.Infof("SQL %s %s", nodeName, selectSql)
 			sqls[nodeName] = append(sqls[nodeName], selectSql)
 		}
 	}

@@ -117,6 +117,9 @@ func NumValue(value interface{}) int64 {
 	panic(NewKeyError("Unexpected key variable type %T", value))
 }
 
+//
+// 定义了Shard接口
+//
 type Shard interface {
 	FindForKey(key interface{}) (int, error)
 }
@@ -139,6 +142,16 @@ func (s *HashShard) FindForKey(key interface{}) (int, error) {
 	h := HashValue(key)
 
 	return int(h % uint64(s.ShardNum)), nil
+}
+
+// 我们自定义的Sharding算法
+type SMHashShard struct {
+	ShardNum int
+}
+
+func (s *SMHashShard) FindForKey(key interface{}) (int, error) {
+	h := HashValue(key)
+	return int((h >> 48) & ((1 << 12) - 1)) % s.ShardNum, nil
 }
 
 // 给定一些列的Range
@@ -190,9 +203,9 @@ func (s *DateYearShard) FindForKey(key interface{}) (int, error) {
 	panic(NewKeyError("Unexpected key variable type %T", key))
 }
 
-
 type DateMonthShard struct {
 }
+
 // key的长度可以比YYYY-MM-DD长，
 // 返回: 201701
 //the format of date is: YYYY-MM-DD HH:MM:SS,YYYY-MM-DD or unix timestamp(int)

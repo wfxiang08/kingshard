@@ -6,3 +6,5 @@ y.output
 *.iml
 core/hack/version.go
 .vscode/
+src/main
+src/kingshard

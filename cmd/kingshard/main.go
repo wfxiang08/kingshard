@@ -19,16 +19,14 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
-	"path"
 	"runtime"
-	"strings"
 	"syscall"
 
 	"github.com/flike/kingshard/config"
-	"github.com/flike/kingshard/core/golog"
 	"github.com/flike/kingshard/core/hack"
 	"github.com/flike/kingshard/proxy/server"
 	"github.com/flike/kingshard/web"
+	log "github.com/wfxiang08/cyutils/utils/rolling_log"
 )
 
 var configFile *string = flag.String("config", "/etc/ks.yaml", "kingshard config file")
@@ -67,21 +65,7 @@ func main() {
 	// 设置Log文件
 	//when the log file size greater than 1GB, kingshard will generate a new file
 	if len(cfg.LogPath) != 0 {
-		sysFilePath := path.Join(cfg.LogPath, sysLogName)
-		sysFile, err := golog.NewRotatingFileHandler(sysFilePath, MaxLogSize, 1)
-		if err != nil {
-			fmt.Printf("new log file error:%v\n", err.Error())
-			return
-		}
-		golog.GlobalSysLogger = golog.New(sysFile, golog.Lfile|golog.Ltime|golog.Llevel)
 
-		sqlFilePath := path.Join(cfg.LogPath, sqlLogName)
-		sqlFile, err := golog.NewRotatingFileHandler(sqlFilePath, MaxLogSize, 1)
-		if err != nil {
-			fmt.Printf("new log file error:%v\n", err.Error())
-			return
-		}
-		golog.GlobalSqlLogger = golog.New(sqlFile, golog.Lfile|golog.Ltime|golog.Llevel)
 	}
 
 	if *logLevel != "" {
@@ -97,16 +81,12 @@ func main() {
 	svr, err = server.NewServer(cfg)
 
 	if err != nil {
-		golog.Error("main", "main", err.Error(), 0)
-		golog.GlobalSysLogger.Close()
-		golog.GlobalSqlLogger.Close()
+		log.ErrorErrorf(err, "server.NewServer failed")
 		return
 	}
 	apiSvr, err = web.NewApiServer(cfg, svr)
 	if err != nil {
-		golog.Error("main", "main", err.Error(), 0)
-		golog.GlobalSysLogger.Close()
-		golog.GlobalSqlLogger.Close()
+		log.ErrorErrorf(err, "web.NewApiServer failed")
 		svr.Close()
 		return
 	}
@@ -125,14 +105,12 @@ func main() {
 			// 异步处理信号
 			sig := <-sc
 			if sig == syscall.SIGINT || sig == syscall.SIGTERM || sig == syscall.SIGQUIT {
-				golog.Info("main", "main", "Got signal", 0, "signal", sig)
-				golog.GlobalSysLogger.Close()
-				golog.GlobalSqlLogger.Close()
+				log.Printf("receive quit signal")
 
 				// 关闭Server, 然后: srv.run就结束
 				svr.Close()
 			} else if sig == syscall.SIGPIPE {
-				golog.Info("main", "main", "Ignore broken pipe signal", 0)
+				log.Printf("Ignore broken pipe signal")
 			}
 		}
 	}()
@@ -144,16 +122,16 @@ func main() {
 }
 
 func setLogLevel(level string) {
-	switch strings.ToLower(level) {
-	case "debug":
-		golog.GlobalSysLogger.SetLevel(golog.LevelDebug)
-	case "info":
-		golog.GlobalSysLogger.SetLevel(golog.LevelInfo)
-	case "warn":
-		golog.GlobalSysLogger.SetLevel(golog.LevelWarn)
-	case "error":
-		golog.GlobalSysLogger.SetLevel(golog.LevelError)
-	default:
-		golog.GlobalSysLogger.SetLevel(golog.LevelError)
-	}
+	//switch strings.ToLower(level) {
+	//case "debug":
+	//	golog.GlobalSysLogger.SetLevel(golog.LevelDebug)
+	//case "info":
+	//	golog.GlobalSysLogger.SetLevel(golog.LevelInfo)
+	//case "warn":
+	//	golog.GlobalSysLogger.SetLevel(golog.LevelWarn)
+	//case "error":
+	//	golog.GlobalSysLogger.SetLevel(golog.LevelError)
+	//default:
+	//	golog.GlobalSysLogger.SetLevel(golog.LevelError)
+	//}
 }

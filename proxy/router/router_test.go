@@ -25,6 +25,7 @@ import (
 )
 
 // Rule的解析以及测试
+// go test github.com/flike/kingshard/proxy/router -v -run "TestParseRule"
 func TestParseRule(t *testing.T) {
 	var s = `
 schema:
@@ -46,6 +47,14 @@ schema:
       nodes: [node2, node3]
       locations: [16,16]
       table_row_limit: 10000
+    -
+      db: kingshard
+      table: test_sm_shard
+      key: id
+      type: range
+      nodes: [node2, node3]
+      locations: [4,4]
+      type: sm
 `
 	var cfg config.Config
 	if err := yaml.Unmarshal([]byte(s), &cfg); err != nil {
@@ -60,6 +69,21 @@ schema:
 		t.Fatal("default rule parse not correct.")
 	}
 
+	{
+		hashRule := rt.GetRule("kingshard", "test_sm_shard")
+		if hashRule.Type != SMRuleType {
+			t.Fatal(hashRule.Type)
+		}
+
+		if len(hashRule.Nodes) != 2 || hashRule.Nodes[0] != "node2" || hashRule.Nodes[1] != "node3" {
+			t.Fatal("parse nodes not correct.")
+		}
+
+		if n, _ := hashRule.FindNode(uint64(450591873)); n != "node2" {
+			t.Fatal(n)
+		}
+
+	}
 	hashRule := rt.GetRule("kingshard", "test_shard_hash")
 	if hashRule.Type != HashRuleType {
 		t.Fatal(hashRule.Type)
@@ -521,14 +545,14 @@ func TestSelectPlan(t *testing.T) {
 	sql = "select * from test1 where id in (5, 6) or (id in (5, 6, 7,8) and id in (1,5,7))"
 	checkPlan(t, sql, []int{5, 6, 7}, []int{1})
 
-    //-
-    //  db: kingshard
-    //  table: test2
-    //  key: id
-    //  type: range
-    //  nodes: [node1,node2,node3]
-    //  locations: [4,4,4]
-    //  table_row_limit: 10000
+	//-
+	//  db: kingshard
+	//  table: test2
+	//  key: id
+	//  type: range
+	//  nodes: [node1,node2,node3]
+	//  locations: [4,4,4]
+	//  table_row_limit: 10000
 	//
 	sql = "select * from test2 where id = 10000"
 	checkPlan(t, sql, []int{1}, []int{0})

@@ -24,10 +24,10 @@ import (
 	"time"
 
 	"github.com/flike/kingshard/core/errors"
-	"github.com/flike/kingshard/core/golog"
 	"github.com/flike/kingshard/core/hack"
 	"github.com/flike/kingshard/mysql"
 	"github.com/flike/kingshard/sqlparser"
+	"github.com/wfxiang08/cyutils/utils/rolling_log"
 )
 
 const (
@@ -115,8 +115,8 @@ func (c *ClientConn) handleNodeCmd(rows sqlparser.InsertRows) error {
 		)
 	default:
 		err = errors.ErrCmdUnsupport
-		golog.Error("ClientConn", "handleNodeCmd", err.Error(),
-			c.connectionId, "opt", opt)
+		rolling_log.ErrorErrorf(err, "ClientConn: handleNodeCmd connectionId: %d, opt: %s ", c.connectionId, opt)
+
 	}
 	return err
 }
@@ -158,8 +158,7 @@ func (c *ClientConn) handleServerCmd(rows sqlparser.InsertRows) (*mysql.Resultse
 		err = c.handleAdminSave(k, v)
 	default:
 		err = errors.ErrCmdUnsupport
-		golog.Error("ClientConn", "handleNodeCmd", err.Error(),
-			c.connectionId, "opt", opt)
+		rolling_log.ErrorErrorf(err, "ClientConn handleNodeCmd: %d, Opt: %s", c.connectionId, opt)
 	}
 	if err != nil {
 		return nil, err
@@ -310,8 +309,7 @@ func (c *ClientConn) handleAdmin(admin *sqlparser.Admin) error {
 	}
 
 	if err != nil {
-		golog.Error("ClientConn", "handleAdmin", err.Error(),
-			c.connectionId, "sql", sqlparser.String(admin))
+		rolling_log.ErrorErrorf(err, "ClientConn handleAdmin: %d, sql: %s", c.connectionId, sqlparser.String(admin))
 		return err
 	}
 
@@ -517,7 +515,7 @@ func (c *ClientConn) handleShowSchemaConfig() (*mysql.Resultset, error) {
 			defaultRule.DB,
 			defaultRule.Table,
 			defaultRule.Type,
-			defaultRule.Key,
+			strings.Join(defaultRule.Keys, ", "),
 			strings.Join(defaultRule.Nodes, ", "),
 			"",
 			"0",
@@ -534,7 +532,7 @@ func (c *ClientConn) handleShowSchemaConfig() (*mysql.Resultset, error) {
 				r.DB,
 				r.Table,
 				r.Type,
-				r.Key,
+				strings.Join(r.Keys, ", "),
 				strings.Join(r.Nodes, ", "),
 				hack.ArrayToString(r.Locations),
 				strconv.Itoa(r.TableRowLimit),

@@ -21,10 +21,10 @@ import (
 	"strings"
 
 	"github.com/flike/kingshard/core/errors"
-	"github.com/flike/kingshard/core/golog"
 	"github.com/flike/kingshard/core/hack"
 	"github.com/flike/kingshard/mysql"
 	"github.com/flike/kingshard/sqlparser"
+	"github.com/wfxiang08/cyutils/utils/rolling_log"
 )
 
 const (
@@ -115,7 +115,7 @@ func (c *ClientConn) handleSelect(stmt *sqlparser.Select, args []interface{}) er
 	// 获取多个conns
 	conns, err := c.getShardConns(fromSlave, plan)
 	if err != nil {
-		golog.Error("ClientConn", "handleSelect", err.Error(), c.connectionId)
+		rolling_log.ErrorErrorf(err, "ClientConn handleSelect connectionId: %d", c.connectionId)
 		return err
 	}
 
@@ -129,14 +129,14 @@ func (c *ClientConn) handleSelect(stmt *sqlparser.Select, args []interface{}) er
 	rs, err = c.executeInMultiNodes(conns, plan.RewrittenSqls, args)
 	c.closeShardConns(conns, false)
 	if err != nil {
-		golog.Error("ClientConn", "handleSelect", err.Error(), c.connectionId)
+		rolling_log.ErrorErrorf(err, "ClientConn handleSelect: %d", c.connectionId)
 		return err
 	}
 
 	// 合并来自多个表的结果
 	err = c.mergeSelectResult(rs, stmt)
 	if err != nil {
-		golog.Error("ClientConn", "handleSelect", err.Error(), c.connectionId)
+		rolling_log.ErrorErrorf(err, "ClientConn handleSelect: %d", c.connectionId)
 	}
 
 	return err

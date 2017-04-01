@@ -17,12 +17,12 @@ import (
 	"time"
 
 	"github.com/flike/kingshard/config"
-	"github.com/flike/kingshard/core/golog"
 	"github.com/flike/kingshard/proxy/server"
 	"github.com/labstack/echo"
 	"github.com/labstack/echo/engine/standard"
 	mw "github.com/labstack/echo/middleware"
 	"github.com/tylerb/graceful"
+	"github.com/wfxiang08/cyutils/utils/rolling_log"
 )
 
 type ApiServer struct {
@@ -44,15 +44,12 @@ func NewApiServer(cfg *config.Config, srv *server.Server) (*ApiServer, error) {
 
 	// 使用Echo服务
 	s.Echo = echo.New()
-	golog.Info("web", "NewApiServer", "Api Server running", 0,
-		"netProto",
-		"http",
-		"address",
-		s.webAddr)
+	rolling_log.Printf("Web ApiServer running: %s", s.webAddr)
 	return s, nil
 }
 
 func (s *ApiServer) Run() error {
+	rolling_log.Info("Web api server running...")
 	s.RegisterMiddleware()
 	s.RegisterURL()
 	std := standard.New(s.webAddr)
@@ -64,13 +61,13 @@ func (s *ApiServer) Run() error {
 // 配置日志, 异常处理，认证
 func (s *ApiServer) RegisterMiddleware() {
 	//s.Use(mw.Logger())
-	s.Use(mw.LoggerWithConfig(mw.LoggerConfig{
-		Format: `{"time":"${time_rfc3339}","remote_ip":"${remote_ip}",` +
-			`"method":"${method}","uri":"${uri}","status":${status}, "latency":${latency},` +
-			`"latency_human":"${latency_human}","bytes_in":${bytes_in},` +
-			`"bytes_out":${bytes_out}}` + "\n",
-		Output: golog.GlobalSqlLogger,
-	}))
+	//s.Use(mw.LoggerWithConfig(mw.LoggerConfig{
+	//	Format: `{"time":"${time_rfc3339}","remote_ip":"${remote_ip}",` +
+	//		`"method":"${method}","uri":"${uri}","status":${status}, "latency":${latency},` +
+	//		`"latency_human":"${latency_human}","bytes_in":${bytes_in},` +
+	//		`"bytes_out":${bytes_out}}` + "\n",
+	//	Output: golog.GlobalSqlLogger,
+	//}))
 	s.Use(mw.Recover())
 	s.Use(mw.BasicAuth(s.CheckAuth))
 }

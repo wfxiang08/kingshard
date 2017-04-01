@@ -23,7 +23,6 @@ import (
 	"time"
 
 	ksError "github.com/flike/kingshard/core/errors"
-	"github.com/flike/kingshard/core/golog"
 	"github.com/labstack/echo"
 )
 
@@ -233,7 +232,7 @@ func (s *ApiServer) ChangeProxyStatus(c echo.Context) error {
 type ShardConfig struct {
 	DB            string   `json:"db"`
 	Table         string   `yaml:"table"`
-	Key           string   `yaml:"key"`
+	Keys          []string `yaml:"keys"`
 	Nodes         []string `yaml:"nodes"`
 	Locations     []int    `yaml:"locations"`
 	Type          string   `yaml:"type"`
@@ -255,7 +254,7 @@ func (s *ApiServer) GetProxySchema(c echo.Context) error {
 			ShardConfig{
 				DB:            r.DB,
 				Table:         r.Table,
-				Key:           r.Key,
+				Keys:          r.Keys,
 				Nodes:         r.Nodes,
 				Locations:     r.Locations,
 				Type:          r.Type,
@@ -317,9 +316,9 @@ func (s *ApiServer) SwitchSlowSQL(c echo.Context) error {
 		return err
 	}
 	args.Opt = strings.ToLower(args.Opt)
-	if args.Opt != golog.LogSqlOn && args.Opt != golog.LogSqlOff {
-		return errors.New("opt only can be on or off")
-	}
+	//if args.Opt != golog.LogSqlOn && args.Opt != golog.LogSqlOff {
+	//	return errors.New("opt only can be on or off")
+	//}
 
 	err = s.proxy.ChangeLogSql(args.Opt)
 	if err != nil {

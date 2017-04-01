@@ -23,9 +23,9 @@ import (
 	"sync"
 
 	"github.com/flike/kingshard/backend"
-	"github.com/flike/kingshard/core/golog"
 	"github.com/flike/kingshard/core/hack"
 	"github.com/flike/kingshard/mysql"
+	log "github.com/wfxiang08/cyutils/utils/rolling_log"
 )
 
 //client <-> proxy
@@ -91,8 +91,7 @@ func (c *ClientConn) IsAllowConnect() bool {
 		}
 	}
 
-	golog.Error("server", "IsAllowConnect", "error", mysql.ER_ACCESS_DENIED_ERROR,
-		"ip address", c.c.RemoteAddr().String(), " access denied by kindshard.")
+	log.Errorf("server IsAllowConnect: %d, ip address: %s access denied by kindshard.", mysql.ER_ACCESS_DENIED_ERROR, c.c.RemoteAddr().String())
 	return false
 }
 
@@ -103,24 +102,21 @@ func (c *ClientConn) Handshake() error {
 
 	// 服务器Handshake到Client
 	if err := c.writeInitialHandshake(); err != nil {
-		golog.Error("server", "Handshake", err.Error(),
-			c.connectionId, "msg", "send initial handshake error")
+		log.ErrorErrorf(err, "server Handshake %v msg: send initial handshake error", c.connectionId)
 		return err
 	}
 
 	// 等待Client回复
 	if err := c.readHandshakeResponse(); err != nil {
-		golog.Error("server", "readHandshakeResponse",
-			err.Error(), c.connectionId,
-			"msg", "read Handshake Response error")
+		log.ErrorErrorf(err, "server readHandshakeResponse %v, msg: read Handshake Response error",
+			c.connectionId)
 		return err
 	}
 
 	// OK就完事
 	if err := c.writeOK(nil); err != nil {
-		golog.Error("server", "readHandshakeResponse",
-			"write ok fail",
-			c.connectionId, "error", err.Error())
+		log.ErrorErrorf(err, "server %v readHandshakeResponse write ok fail",
+			c.connectionId)
 		return err
 	}
 
@@ -249,12 +245,7 @@ func (c *ClientConn) readHandshakeResponse() error {
 	//
 	checkAuth := mysql.CalcPassword(c.salt, []byte(c.proxy.cfg.Password))
 	if c.user != c.proxy.cfg.User || !bytes.Equal(auth, checkAuth) {
-		golog.Error("ClientConn", "readHandshakeResponse", "error", 0,
-			"auth", auth,
-			"checkAuth", checkAuth,
-			"client_user", c.user,
-			"config_set_user", c.proxy.cfg.User,
-			"passworld", c.proxy.cfg.Password)
+		log.Errorf("ClientConn readHandshakeResponse: auth: failed ")
 		return mysql.NewDefaultError(mysql.ER_ACCESS_DENIED_ERROR, c.user, c.c.RemoteAddr().String(), "Yes")
 	}
 
@@ -287,9 +278,7 @@ func (c *ClientConn) Run() {
 			buf := make([]byte, size)
 			buf = buf[:runtime.Stack(buf, false)]
 
-			golog.Error("ClientConn", "Run",
-				err.Error(), 0,
-				"stack", string(buf))
+			log.ErrorErrorf(err, "ClientConn Run: %v", string(buf))
 		}
 
 		c.Close()
@@ -308,9 +297,7 @@ func (c *ClientConn) Run() {
 		if err := c.dispatch(data); err != nil {
 			c.proxy.counter.IncrErrLogTotal()
 
-			golog.Error("server", "Run",
-				err.Error(), c.connectionId,
-			)
+			log.ErrorErrorf(err, "Server run connectionId: %v", c.connectionId)
 
 			// 给客户端报错，结束Connection
 			c.writeError(err)
@@ -335,6 +322,7 @@ func (c *ClientConn) Run() {
 func (c *ClientConn) dispatch(data []byte) error {
 	c.proxy.counter.IncrClientQPS()
 
+	log.Printf("ClientConn: %s", string(data))
 	// 读取Command和data
 	cmd := data[0]
 	data = data[1:]
@@ -374,7 +362,7 @@ func (c *ClientConn) dispatch(data []byte) error {
 		return c.writeEOF(0)
 	default:
 		msg := fmt.Sprintf("command %d not supported now", cmd)
-		golog.Error("ClientConn", "dispatch", msg, 0)
+		log.Errorf("ClientConn dispatch: %s", msg)
 		return mysql.NewError(mysql.ER_UNKNOWN_ERROR, msg)
 	}
 

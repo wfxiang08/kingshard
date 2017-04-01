@@ -22,8 +22,8 @@ import (
 
 	"fmt"
 	"github.com/flike/kingshard/core/errors"
-	"github.com/flike/kingshard/core/golog"
 	"github.com/flike/kingshard/sqlparser"
+	log "github.com/wfxiang08/cyutils/utils/rolling_log"
 )
 
 const (
@@ -67,7 +67,7 @@ func (plan *Plan) notList(l []int) []int {
 // 如何根据表达式获取Indexs呢？
 func (plan *Plan) getTableIndexs(expr sqlparser.BoolExpr) ([]int, error) {
 	switch plan.Rule.Type {
-	case HashRuleType:
+	case HashRuleType, SMRuleType:
 		// 如何处理hashRule呢?
 		return plan.getHashShardTableIndex(expr)
 	case RangeRuleType:
@@ -319,8 +319,7 @@ func (plan *Plan) calRouteIndexs() error {
 
 	if plan.Criteria == nil { //如果没有分表条件，则是全子表扫描
 		if plan.Rule.Type != DefaultRuleType {
-			golog.Error("Plan", "calRouteIndexs", "plan have no criteria", 0,
-				"type", plan.Rule.Type)
+			log.Errorf("Plan calRouteIndexs plan have no criteria, Type: %s", plan.Rule.Type)
 			return errors.ErrNoCriteria
 		}
 	}
@@ -382,7 +381,7 @@ func (plan *Plan) getValueType(valExpr sqlparser.ValExpr) int {
 		if string(node.Qualifier) == plan.Rule.Table {
 			node.Qualifier = nil
 		}
-		if strings.ToLower(string(node.Name)) == plan.Rule.Key {
+		if listContains(strings.ToLower(string(node.Name)), plan.Rule.Keys) {
 			return EID_NODE //表示这是分片id对应的node
 		}
 	case sqlparser.ValTuple:
@@ -551,7 +550,7 @@ func (plan *Plan) GetIRKeyIndex(cols sqlparser.Columns) error {
 	for i, _ := range cols {
 		colname := string(cols[i].(*sqlparser.NonStarExpr).Expr.(*sqlparser.ColName).Name)
 
-		if strings.ToLower(colname) == plan.Rule.Key {
+		if strings.ToLower(colname) == plan.Rule.Keys[0] {
 			plan.KeyIndex = i
 			break
 		}

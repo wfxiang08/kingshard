@@ -1,17 +1,3 @@
-// Copyright 2016 The kingshard Authors. All rights reserved.
-//
-// Licensed under the Apache License, Version 2.0 (the "License"): you may
-// not use this file except in compliance with the License. You may obtain
-// a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
-// WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
-// License for the specific language governing permissions and limitations
-// under the License.
-
 package server
 
 import (
@@ -31,8 +17,8 @@ import (
 	"github.com/flike/kingshard/backend"
 	"github.com/flike/kingshard/config"
 	"github.com/flike/kingshard/core/errors"
-	"github.com/flike/kingshard/core/golog"
 	"github.com/flike/kingshard/proxy/router"
+	log "github.com/wfxiang08/cyutils/utils/rolling_log"
 )
 
 type Schema struct {
@@ -52,10 +38,10 @@ const (
 )
 
 type Server struct {
-	cfg                *config.Config
-	addr               string
-	user               string
-	password           string
+	cfg      *config.Config
+	addr     string
+	user     string
+	password string
 	//db       string
 
 	// 这些是什么逻辑?
@@ -70,12 +56,12 @@ type Server struct {
 	allowipsIndex      int32
 	allowips           [2][]net.IP
 
-	counter            *Counter
-	nodes              map[string]*backend.Node
-	schema             *Schema
+	counter *Counter
+	nodes   map[string]*backend.Node
+	schema  *Schema
 
-	listener           net.Listener
-	running            bool
+	listener net.Listener
+	running  bool
 }
 
 // 返回Server的状态
@@ -157,22 +143,22 @@ func (s *Server) parseNode(cfg config.NodeConfig) (*backend.Node, error) {
 	n := new(backend.Node)
 	n.Cfg = cfg
 
-    //name : node1
-    //
-    //# default max conns for mysql server
-    //max_conns_limit : 32
-    //
-    //# all mysql in a node must have the same user and password
-    //user :  root
-    //password : root
-    //
-    //# master represents a real mysql master server
-    //master : 127.0.0.1:3307
-    //
-    //# slave represents a real mysql salve server,and the number after '@' is
-    //# read load weight of this slave.
-    //#slave : 192.168.59.101:3307@2,192.168.59.101:3307@3
-    //down_after_noalive : 32
+	//name : node1
+	//
+	//# default max conns for mysql server
+	//max_conns_limit : 32
+	//
+	//# all mysql in a node must have the same user and password
+	//user :  root
+	//password : root
+	//
+	//# master represents a real mysql master server
+	//master : 127.0.0.1:3307
+	//
+	//# slave represents a real mysql salve server,and the number after '@' is
+	//# read load weight of this slave.
+	//#slave : 192.168.59.101:3307@2,192.168.59.101:3307@3
+	//down_after_noalive : 32
 	//
 	n.DownAfterNoAlive = time.Duration(cfg.DownAfterNoAlive) * time.Second
 	err = n.ParseMaster(cfg.Master)
@@ -293,11 +279,8 @@ func NewServer(cfg *config.Config) (*Server, error) {
 		return nil, err
 	}
 
-	golog.Info("server", "NewServer", "Server running", 0,
-		"netProto",
-		netProto,
-		"address",
-		s.addr)
+	log.Printf("Proxy Server running, address: %s", s.addr)
+
 	return s, nil
 }
 
@@ -364,10 +347,8 @@ func (s *Server) onConn(c net.Conn) {
 
 			// 获取runtime.Stack
 			buf = buf[:runtime.Stack(buf, false)] //获得当前goroutine的stacktrace
-			golog.Error("server", "onConn", "error", 0,
-				"remoteAddr", c.RemoteAddr().String(),
-				"stack", string(buf),
-			)
+			log.Errorf("server onConn, remoteAddr: %s, err: %v, statck: %s", c.RemoteAddr().String(), err, string(buf))
+
 		}
 
 		// 关闭Connection，处理计数器
@@ -375,7 +356,6 @@ func (s *Server) onConn(c net.Conn) {
 		conn.Close()
 		s.counter.DecrClientConns()
 	}()
-
 
 	// 检查权限
 	if allowConnect := conn.IsAllowConnect(); allowConnect == false {
@@ -385,12 +365,13 @@ func (s *Server) onConn(c net.Conn) {
 		return
 	}
 	if err := conn.Handshake(); err != nil {
-		golog.Error("server", "onConn", err.Error(), 0)
+		log.ErrorErrorf(err, "Handshake error")
 		conn.writeError(err)
 		conn.Close()
 		return
 	}
 
+	log.Printf("New Connection created")
 	conn.Run()
 }
 
@@ -421,9 +402,9 @@ func (s *Server) ChangeProxy(v string) error {
 
 func (s *Server) ChangeLogSql(v string) error {
 	v = strings.ToLower(v)
-	if v != golog.LogSqlOn && v != golog.LogSqlOff {
-		return errors.ErrCmdUnsupport
-	}
+	//if v != golog.LogSqlOn && v != golog.LogSqlOff {
+	//	return errors.ErrCmdUnsupport
+	//}
 	if s.logSqlIndex == 0 {
 		s.logSql[1] = v
 		atomic.StoreInt32(&s.logSqlIndex, 1)
@@ -490,11 +471,11 @@ func (s *Server) DelAllowIP(v string) error {
 		ipVec2 := strings.Split(s.cfg.AllowIps, ",")
 		for i, ip := range s.allowips[1] {
 			if ip.Equal(clientIP) {
-				s.allowips[1] = append(s.allowips[1][:i], s.allowips[1][i + 1:]...)
+				s.allowips[1] = append(s.allowips[1][:i], s.allowips[1][i+1:]...)
 				atomic.StoreInt32(&s.allowipsIndex, 1)
 				for i, ip := range ipVec2 {
 					if ip == v {
-						ipVec2 = append(ipVec2[:i], ipVec2[i + 1:]...)
+						ipVec2 = append(ipVec2[:i], ipVec2[i+1:]...)
 						s.cfg.AllowIps = strings.Trim(strings.Join(ipVec2, ","), ",")
 						return nil
 					}
@@ -507,11 +488,11 @@ func (s *Server) DelAllowIP(v string) error {
 		ipVec2 := strings.Split(s.cfg.AllowIps, ",")
 		for i, ip := range s.allowips[0] {
 			if ip.Equal(clientIP) {
-				s.allowips[0] = append(s.allowips[0][:i], s.allowips[0][i + 1:]...)
+				s.allowips[0] = append(s.allowips[0][:i], s.allowips[0][i+1:]...)
 				atomic.StoreInt32(&s.allowipsIndex, 0)
 				for i, ip := range ipVec2 {
 					if ip == v {
-						ipVec2 = append(ipVec2[:i], ipVec2[i + 1:]...)
+						ipVec2 = append(ipVec2[:i], ipVec2[i+1:]...)
 						s.cfg.AllowIps = strings.Trim(strings.Join(ipVec2, ","), ",")
 						return nil
 					}
@@ -591,10 +572,7 @@ func (s *Server) saveBlackSql() error {
 	}
 	f, err := os.Create(s.cfg.BlsFile)
 	if err != nil {
-		golog.Error("Server", "saveBlackSql", "create file error", 0,
-			"err", err.Error(),
-			"blacklist_sql_file", s.cfg.BlsFile,
-		)
+		log.ErrorErrorf(err, "saveBlackSql create file error, blacklist_sql_file: %s", s.cfg.BlsFile)
 		return err
 	}
 
@@ -627,6 +605,7 @@ func (s *Server) SaveProxyConfig() error {
 // 监听端口，Running
 //
 func (s *Server) Run() error {
+	log.Info("Proxy server run...")
 	s.running = true
 
 	// flush counter
@@ -637,8 +616,9 @@ func (s *Server) Run() error {
 		// 监听socket
 		// s.listener.Close() 或者有新请求，则返回
 		conn, err := s.listener.Accept()
+		log.Info("Proxy get new connection")
 		if err != nil {
-			golog.Error("server", "Run", err.Error(), 0)
+			log.ErrorErrorf(err, "server Run")
 			continue
 		}
 
@@ -676,7 +656,7 @@ func (s *Server) DeleteSlave(node string, addr string) error {
 	for i, v1 := range s.cfg.Nodes {
 		if node == v1.Name {
 			s1 := strings.Split(v1.Slave, backend.SlaveSplit)
-			s2 := make([]string, 0, len(s1) - 1)
+			s2 := make([]string, 0, len(s1)-1)
 			for _, v2 := range s1 {
 				hostPort := strings.Split(v2, backend.WeightSplit)[0]
 				if addr != hostPort {

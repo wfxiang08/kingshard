@@ -67,7 +67,7 @@ type SchemaConfig struct {
 type ShardConfig struct {
 	DB            string   `yaml:"db"`
 	Table         string   `yaml:"table"`
-	Key           string   `yaml:"key"`
+	Keys          []string `yaml:"keys"`
 	Nodes         []string `yaml:"nodes"`
 	Locations     []int    `yaml:"locations"`
 	Type          string   `yaml:"type"`
