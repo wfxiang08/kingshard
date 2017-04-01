@@ -731,8 +731,11 @@ func (r *Router) generateSelectSql(plan *Plan, stmt sqlparser.Statement) error {
 		buf := sqlparser.NewTrackedBuffer(nil)
 		stmt.Format(buf)
 		nodeName := r.Nodes[0]
-		sqls[nodeName] = []string{buf.String()}
-		log.Infof("Router %s", buf.String())
+
+		selectSql := buf.String()
+		sqls[nodeName] = []string{selectSql}
+		log.Infof("SQL@%s: %s", nodeName, selectSql)
+
 	} else {
 
 		// 有这么多个表，不同的表可能分布在不同的node上
@@ -749,7 +752,7 @@ func (r *Router) generateSelectSql(plan *Plan, stmt sqlparser.Statement) error {
 				sqls[nodeName] = make([]string, 0, tableCount)
 			}
 
-			log.Infof("SQL %s %s", nodeName, selectSql)
+			log.Infof("SQL@%s: %s", nodeName, selectSql)
 			sqls[nodeName] = append(sqls[nodeName], selectSql)
 		}
 	}
@@ -770,7 +773,9 @@ func (r *Router) generateInsertSql(plan *Plan, stmt sqlparser.Statement) error {
 		buf := sqlparser.NewTrackedBuffer(nil)
 		stmt.Format(buf)
 		nodeName := r.Nodes[0]
-		sqls[nodeName] = []string{buf.String()}
+		insertSQL := buf.String()
+		log.Infof("SQL@%s: %s", nodeName, insertSQL)
+		sqls[nodeName] = []string{insertSQL}
 	} else {
 		tableCount := len(plan.RouteTableIndexs)
 		for i := 0; i < tableCount; i++ {
@@ -789,7 +794,10 @@ func (r *Router) generateInsertSql(plan *Plan, stmt sqlparser.Statement) error {
 			if _, ok := sqls[nodeName]; ok == false {
 				sqls[nodeName] = make([]string, 0, tableCount)
 			}
-			sqls[nodeName] = append(sqls[nodeName], buf.String())
+
+			insertSQL := buf.String()
+			log.Infof("SQL@%s: %s", nodeName, insertSQL)
+			sqls[nodeName] = append(sqls[nodeName], insertSQL)
 		}
 
 	}
@@ -810,7 +818,11 @@ func (r *Router) generateUpdateSql(plan *Plan, stmt sqlparser.Statement) error {
 		buf := sqlparser.NewTrackedBuffer(nil)
 		stmt.Format(buf)
 		nodeName := r.Nodes[0]
-		sqls[nodeName] = []string{buf.String()}
+
+		updateSQL := buf.String()
+		log.Infof("SQL@%s: %s", nodeName, updateSQL)
+
+		sqls[nodeName] = []string{updateSQL}
 	} else {
 		tableCount := len(plan.RouteTableIndexs)
 		for i := 0; i < tableCount; i++ {
@@ -832,7 +844,10 @@ func (r *Router) generateUpdateSql(plan *Plan, stmt sqlparser.Statement) error {
 			if _, ok := sqls[nodeName]; ok == false {
 				sqls[nodeName] = make([]string, 0, tableCount)
 			}
-			sqls[nodeName] = append(sqls[nodeName], buf.String())
+
+			updateSQL := buf.String()
+			log.Infof("SQL@%s: %s", nodeName, updateSQL)
+			sqls[nodeName] = append(sqls[nodeName], updateSQL)
 		}
 
 	}
@@ -853,7 +868,12 @@ func (r *Router) generateDeleteSql(plan *Plan, stmt sqlparser.Statement) error {
 		buf := sqlparser.NewTrackedBuffer(nil)
 		stmt.Format(buf)
 		nodeName := r.Nodes[0]
-		sqls[nodeName] = []string{buf.String()}
+
+		deleteSQL := buf.String()
+		log.Infof("SQL@%s: %s", nodeName, deleteSQL)
+
+		sqls[nodeName] = []string{deleteSQL}
+
 	} else {
 		tableCount := len(plan.RouteTableIndexs)
 		for i := 0; i < tableCount; i++ {
@@ -874,7 +894,11 @@ func (r *Router) generateDeleteSql(plan *Plan, stmt sqlparser.Statement) error {
 			if _, ok := sqls[nodeName]; ok == false {
 				sqls[nodeName] = make([]string, 0, tableCount)
 			}
-			sqls[nodeName] = append(sqls[nodeName], buf.String())
+
+			deleteSQL := buf.String()
+			log.Infof("SQL@%s: %s", nodeName, deleteSQL)
+
+			sqls[nodeName] = append(sqls[nodeName], deleteSQL)
 		}
 
 	}
@@ -895,7 +919,10 @@ func (r *Router) generateReplaceSql(plan *Plan, stmt sqlparser.Statement) error 
 		buf := sqlparser.NewTrackedBuffer(nil)
 		stmt.Format(buf)
 		nodeName := r.Nodes[0]
-		sqls[nodeName] = []string{buf.String()}
+		replaceSQL := buf.String()
+		log.Infof("SQL@%s: %s", nodeName, replaceSQL)
+
+		sqls[nodeName] = []string{replaceSQL}
 	} else {
 		tableCount := len(plan.RouteTableIndexs)
 		for i := 0; i < tableCount; i++ {
@@ -917,7 +944,10 @@ func (r *Router) generateReplaceSql(plan *Plan, stmt sqlparser.Statement) error 
 			if _, ok := sqls[nodeName]; ok == false {
 				sqls[nodeName] = make([]string, 0, tableCount)
 			}
-			sqls[nodeName] = append(sqls[nodeName], buf.String())
+
+			replaceSQL := buf.String()
+			log.Infof("SQL@%s: %s", nodeName, replaceSQL)
+			sqls[nodeName] = append(sqls[nodeName], replaceSQL)
 		}
 
 	}
@@ -938,7 +968,9 @@ func (r *Router) generateTruncateSql(plan *Plan, stmt sqlparser.Statement) error
 		buf := sqlparser.NewTrackedBuffer(nil)
 		stmt.Format(buf)
 		nodeName := r.Nodes[0]
-		sqls[nodeName] = []string{buf.String()}
+		truncateSQL := buf.String()
+		log.Infof("SQL@%s: %s", nodeName, truncateSQL)
+		sqls[nodeName] = []string{truncateSQL}
 	} else {
 		tableCount := len(plan.RouteTableIndexs)
 		for i := 0; i < tableCount; i++ {
@@ -955,7 +987,11 @@ func (r *Router) generateTruncateSql(plan *Plan, stmt sqlparser.Statement) error
 			if _, ok := sqls[nodeName]; ok == false {
 				sqls[nodeName] = make([]string, 0, tableCount)
 			}
-			sqls[nodeName] = append(sqls[nodeName], buf.String())
+
+			truncateSQL := buf.String()
+			log.Infof("SQL@%s: %s", nodeName, truncateSQL)
+
+			sqls[nodeName] = append(sqls[nodeName], truncateSQL)
 		}
 
 	}

@@ -44,10 +44,9 @@ func (c *ClientConn) handleSet(stmt *sqlparser.Set, sql string) (err error) {
 		execTime := float64(time.Now().UnixNano()-startTime) / float64(time.Millisecond)
 		if execTime > float64(c.proxy.slowLogTime[c.proxy.slowLogTimeIndex]) {
 			c.proxy.counter.IncrSlowLogTotal()
-			rolling_log.Printf("State: %s, %.1fms - %s->%s:%s", state, execTime,
-				c.c.RemoteAddr(),
-				c.proxy.addr,
-				sql)
+
+			rolling_log.Printf("SLOW State: %s, %.1fms, Remote:%s, SQL: %s", state, execTime,
+				c.c.RemoteAddr(), sql)
 
 		}
 

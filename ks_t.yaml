@@ -43,10 +43,6 @@ nodes :
     user :  root
     password :
     master : 127.0.0.1:3306
-
-    # slave represents a real mysql salve server,and the number after '@' is 
-    # read load weight of this slave.
-    #slave : 192.168.59.101:3307@2,192.168.59.101:3307@3
     down_after_noalive : 32
 
 
@@ -61,4 +57,4 @@ schema :
         keys: [id, uid]
         nodes: [node1]
         type: sm
-        locations: [2]
+        locations: [32]
