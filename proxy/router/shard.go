@@ -153,6 +153,9 @@ func (s *SMHashShard) FindForKey(key interface{}) (int, error) {
 	h := HashValue(key)
 	return int((h >> 48) & ((1 << 12) - 1)) % s.ShardNum, nil
 }
+func SMShard(h uint64) int {
+	return int((h >> 48) & ((1 << 12) - 1));
+}
 
 // 给定一些列的Range
 type NumRangeShard struct {
