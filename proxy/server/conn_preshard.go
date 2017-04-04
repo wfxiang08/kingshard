@@ -1,17 +1,3 @@
-// Copyright 2016 The kingshard Authors. All rights reserved.
-//
-// Licensed under the Apache License, Version 2.0 (the "License"): you may
-// not use this file except in compliance with the License. You may obtain
-// a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
-// WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
-// License for the specific language governing permissions and limitations
-// under the License.
-
 package server
 
 import (
@@ -24,7 +10,7 @@ import (
 	"github.com/flike/kingshard/mysql"
 	"github.com/flike/kingshard/proxy/router"
 	"github.com/flike/kingshard/sqlparser"
-	"github.com/wfxiang08/cyutils/utils/rolling_log"
+	log "github.com/wfxiang08/cyutils/utils/rolling_log"
 )
 
 type ExecuteDB struct {
@@ -46,7 +32,9 @@ func (c *ClientConn) isBlacklistSql(sql string) bool {
 	return false
 }
 
-//preprocessing sql before parse sql
+//
+//预处理sql
+//
 func (c *ClientConn) preHandleShard(sql string) (bool, error) {
 	var rs []*mysql.Result
 	var err error
@@ -56,27 +44,24 @@ func (c *ClientConn) preHandleShard(sql string) (bool, error) {
 		return false, errors.ErrCmdUnsupport
 	}
 
-	// 如何禁止某个SQL语句呢?
-	// filter the blacklist sql
+	// 1. 如何禁止某个SQL语句呢?
 	if c.proxy.blacklistSqls[c.proxy.blacklistSqlsIndex].sqlsLen != 0 {
 		// 如果Blacklist，则返回
 		if c.isBlacklistSql(sql) {
-			rolling_log.Printf("Forbidden: %s->%s:%s", c.c.RemoteAddr(),
-				c.proxy.addr, sql)
+			log.Infof("Forbidden: %s:%s", c.c.RemoteAddr(), sql)
 			err := mysql.NewError(mysql.ER_UNKNOWN_ERROR, "sql in blacklist.")
 			return false, err
 		}
 	}
 
-	// 将sql分解成为tokens
+	// 2. 将sql分解成为tokens
 	tokens := strings.FieldsFunc(sql, hack.IsSqlSep)
 
 	if len(tokens) == 0 {
 		return false, errors.ErrCmdUnsupport
 	}
 
-	// 获取要执行的DB
-	// tokens该如何立即呢?
+	// 3. 获取要执行的DB
 	if c.isInTransaction() {
 		executeDB, err = c.GetTransExecDB(tokens, sql)
 	} else {
@@ -84,7 +69,7 @@ func (c *ClientConn) preHandleShard(sql string) (bool, error) {
 	}
 
 	if err != nil {
-		//this SQL doesn't need execute in the backend.
+		// 如果出现错误，则直接返回给Client, 不用继续到backend去执行SQL
 		if err == errors.ErrIgnoreSQL {
 			err = c.writeOK(nil)
 			if err != nil {
@@ -94,7 +79,8 @@ func (c *ClientConn) preHandleShard(sql string) (bool, error) {
 		}
 		return false, err
 	}
-	//need shard sql
+
+	// need shard sql
 	if executeDB == nil {
 		return false, nil
 	}
@@ -115,7 +101,7 @@ func (c *ClientConn) preHandleShard(sql string) (bool, error) {
 
 	if len(rs) == 0 {
 		msg := fmt.Sprintf("result is empty")
-		rolling_log.Errorf("ClientConn handleUnsupport: %s, sql: %s", msg, sql)
+		log.Errorf("ClientConn handleUnsupport: %s, sql: %s", msg, sql)
 		return false, mysql.NewError(mysql.ER_UNKNOWN_ERROR, msg)
 	}
 
@@ -177,13 +163,20 @@ func (c *ClientConn) GetTransExecDB(tokens []string, sql string) (*ExecuteDB, er
 	return executeDB, nil
 }
 
-//if sql need shard return nil, else return the unshard db
+// if sql need shard return nil,
+// else return the unshard db
+//
 func (c *ClientConn) GetExecDB(tokens []string, sql string) (*ExecuteDB, error) {
 	tokensLen := len(tokens)
+
 	// 这里不考虑/*node*/这种情况
 	if 0 < tokensLen {
 		tokenId, ok := mysql.PARSE_TOKEN_MAP[strings.ToLower(tokens[0])]
 		if ok == true {
+			// 第一个token应该为各种动作
+			// select, delete, insert, update, replace, set, show, truncate
+			// 好像不支持create table, alter table等?
+			//
 			switch tokenId {
 			case mysql.TK_ID_SELECT:
 				return c.getSelectExecDB(sql, tokens, tokensLen)
@@ -243,7 +236,9 @@ func (c *ClientConn) setExecuteNode(tokens []string, tokensLen int, executeDB *E
 	return nil
 }
 
-//get the execute database for select sql
+//
+//获取Select语句的ExecDB
+//
 func (c *ClientConn) getSelectExecDB(sql string, tokens []string, tokensLen int) (*ExecuteDB, error) {
 	var ruleDB string
 	executeDB := new(ExecuteDB)
@@ -259,12 +254,18 @@ func (c *ClientConn) getSelectExecDB(sql string, tokens []string, tokensLen int)
 			if strings.ToLower(tokens[i]) == mysql.TK_STR_FROM {
 				if i+1 < tokensLen {
 					DBName, tableName := sqlparser.GetDBTable(tokens[i+1])
-					//if the token[i+1] like this:kingshard.test_shard_hash
+
+					// 两种DBName的获取方式，如果SQL中explicitly指定database, 那么以SQL为准；
+					// 否则使用当前connection默认的DB
+					// 一个DBConnection一次只能使用一个DB?
+					// if the token[i+1] like this:kingshard.test_shard_hash
 					if DBName != "" {
 						ruleDB = DBName
 					} else {
 						ruleDB = c.db
 					}
+
+					// 如果DB/Table不存在Rule, 则在直接返回
 					if router.GetRule(ruleDB, tableName) != router.DefaultRule {
 						return nil, nil
 					} else {
@@ -275,6 +276,7 @@ func (c *ClientConn) getSelectExecDB(sql string, tokens []string, tokensLen int)
 				}
 			}
 
+			// select last_insert_id(); 这个如何执行呢? 确实是一个难点
 			if strings.ToLower(tokens[i]) == mysql.TK_STR_LAST_INSERT_ID {
 				return nil, nil
 			}

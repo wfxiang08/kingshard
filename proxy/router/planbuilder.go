@@ -22,8 +22,8 @@ import (
 
 	"fmt"
 	"github.com/flike/kingshard/core/errors"
-	"github.com/flike/kingshard/sqlparser"
 	log "github.com/wfxiang08/cyutils/utils/rolling_log"
+	"github.com/flike/kingshard/sqlparser"
 )
 
 const (
@@ -272,6 +272,7 @@ func (plan *Plan) getDateShardTableIndex(expr sqlparser.BoolExpr) ([]int, error)
 		case "in":
 			return plan.getTableIndexsByTuple(criteria.Right)
 		case "not in":
+			// TODO: 存在问题
 			l, err := plan.getTableIndexsByTuple(criteria.Right)
 			if err != nil {
 				return nil, err
@@ -329,7 +330,7 @@ func (plan *Plan) calRouteIndexs() error {
 	//
 	switch criteria := plan.Criteria.(type) {
 	case sqlparser.Values: //代表insert中values
-		fmt.Printf("case sqlparser.Values\n")
+		// fmt.Printf("case sqlparser.Values\n")
 		plan.RouteTableIndexs, err = plan.getInsertTableIndex(criteria)
 		if err != nil {
 			return err
@@ -338,7 +339,7 @@ func (plan *Plan) calRouteIndexs() error {
 		return nil
 	case sqlparser.BoolExpr:
 		// 例如: id in (1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22)
-		fmt.Printf("case sqlparser.BoolExpr\n")
+		// fmt.Printf("case sqlparser.BoolExpr\n")
 		plan.RouteTableIndexs, err = plan.getTableIndexByBoolExpr(criteria)
 		if err != nil {
 			return err
@@ -349,7 +350,7 @@ func (plan *Plan) calRouteIndexs() error {
 		return nil
 	default:
 		// 其他情况，直接所有的table一起搜索
-		fmt.Printf("case default\n")
+		// fmt.Printf("case default\n")
 		plan.RouteTableIndexs = plan.Rule.SubTableIndexs
 		plan.RouteNodeIndexs = makeList(0, nodesCount)
 		return nil
@@ -467,7 +468,7 @@ func (plan *Plan) getTableIndexByBoolExpr(node sqlparser.BoolExpr) ([]int, error
 		}
 	}
 
-	fmt.Printf("case other\n")
+	// fmt.Printf("case other\n")
 	return plan.Rule.SubTableIndexs, nil
 }
 

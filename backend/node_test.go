@@ -25,10 +25,10 @@ func TestParse(t *testing.T) {
 	nodeConfig := config.NodeConfig{
 		Name:             "node1",
 		DownAfterNoAlive: 100,
-		IdleConns:        16,
-		User:             "hello",
-		Password:         "world",
-		Master:           "127.0.0.1:3307",
+		// IdleConns:        16,
+		User:     "hello",
+		Password: "world",
+		Master:   "127.0.0.1:3307",
 		Slave: []string{
 			"192.168.1.12:3306@2",
 			"192.168.1.13:3306@4",

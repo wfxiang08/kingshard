@@ -65,6 +65,7 @@ func (n *Node) String() string {
 	return n.Cfg.Name
 }
 
+// 获取Master的Connection
 func (n *Node) GetMasterConn() (*BackendConn, error) {
 	db := n.Master
 	if db == nil {
@@ -80,8 +81,8 @@ func (n *Node) GetMasterConn() (*BackendConn, error) {
 // 获取一个Slave? DB的选择很重要
 func (n *Node) GetSlaveConn() (*BackendConn, error) {
 	n.Lock()
+
 	// 获取下一个Slave
-	// TODO:
 	db, err := n.GetNextSlave()
 	n.Unlock()
 	if err != nil {
@@ -127,7 +128,8 @@ func (n *Node) checkMaster() {
 
 	// 标记Master数据库挂了
 	if int64(n.DownAfterNoAlive) > 0 && time.Now().Unix()-db.GetLastPing() > int64(n.DownAfterNoAlive/time.Second) {
-		log.Printf("Node: checkMaster Master down db.Addr: %s, Master_down_time: %d", db.Addr(), int64(n.DownAfterNoAlive/time.Second))
+		log.Printf("Node: checkMaster Master down db.Addr: %s, Master_down_time: %d",
+			db.Addr(), int64(n.DownAfterNoAlive/time.Second))
 		n.DownMaster(db.addr, Down)
 	}
 }

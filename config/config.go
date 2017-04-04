@@ -37,7 +37,7 @@ type Config struct {
 	SlowLogTime int          `yaml:"slow_log_time"`
 	AllowIps    string       `yaml:"allow_ips"`
 	BlsFile     string       `yaml:"blacklist_sql_file"`
-	Charset     string       `yaml:"proxy_charset"`
+	Charset     string       `yaml:"proxy_charset"` // 在配置文件中指定字符集
 	Nodes       []NodeConfig `yaml:"nodes"`
 
 	Schema SchemaConfig `yaml:"schema"`

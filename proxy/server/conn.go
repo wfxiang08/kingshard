@@ -322,29 +322,35 @@ func (c *ClientConn) Run() {
 func (c *ClientConn) dispatch(data []byte) error {
 	c.proxy.counter.IncrClientQPS()
 
-	log.Printf("ClientConn: %s", string(data))
+	log.Debugf("ClientConn: %s", string(data))
+
 	// 读取Command和data
 	cmd := data[0]
 	data = data[1:]
 
 	switch cmd {
 	case mysql.COM_QUIT:
-		// 退出
+		// 退出(回滚当前的事务)
 		c.handleRollback()
 		c.Close()
 		return nil
+
 	case mysql.COM_QUERY:
+		// 解析执行Query
 		return c.handleQuery(hack.String(data))
 
 	case mysql.COM_PING:
+		// 如果是Ping, 则直接返回Client OK
 		return c.writeOK(nil)
 
 	case mysql.COM_INIT_DB:
+		//
 		return c.handleUseDB(hack.String(data))
 
 	case mysql.COM_FIELD_LIST:
 		return c.handleFieldList(data)
 
+		// Statement的使用
 	case mysql.COM_STMT_PREPARE:
 		return c.handleStmtPrepare(hack.String(data))
 	case mysql.COM_STMT_EXECUTE:
@@ -360,7 +366,9 @@ func (c *ClientConn) dispatch(data []byte) error {
 
 	case mysql.COM_SET_OPTION:
 		return c.writeEOF(0)
+
 	default:
+		// 其他的Command暂时不支持
 		msg := fmt.Sprintf("command %d not supported now", cmd)
 		log.Errorf("ClientConn dispatch: %s", msg)
 		return mysql.NewError(mysql.ER_UNKNOWN_ERROR, msg)

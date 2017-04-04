@@ -27,41 +27,45 @@ import (
 	"github.com/flike/kingshard/mysql"
 	"github.com/flike/kingshard/proxy/router"
 	"github.com/flike/kingshard/sqlparser"
-	"github.com/wfxiang08/cyutils/utils/rolling_log"
+	log "github.com/wfxiang08/cyutils/utils/rolling_log"
 )
 
 /*处理query语句*/
 func (c *ClientConn) handleQuery(sql string) (err error) {
 	defer func() {
+		// 处理panic等错误，防止崩溃
 		if e := recover(); e != nil {
-			rolling_log.Printf("err:%v,sql:%s", e, sql)
+			log.Errorf("err:%v, sql:%s", e, sql)
 
 			if err, ok := e.(error); ok {
 				const size = 4096
 				buf := make([]byte, size)
 				buf = buf[:runtime.Stack(buf, false)]
-				rolling_log.ErrorErrorf(err, "ClientConn handleQuery stack: %s, sql: %s", string(buf), sql)
+				log.ErrorErrorf(err, "ClientConn handleQuery stack: %s, sql: %s", string(buf), sql)
 			}
 			return
 		}
 	}()
 
 	// 如何执行query呢?
-	sql = strings.TrimRight(sql, ";") //删除sql语句最后的分号
+	// 1. 删除SQL语句最后的分号
+	sql = strings.TrimRight(sql, ";")
 
+	// 2. 根据SQL进行Shard
 	hasHandled, err := c.preHandleShard(sql)
 	if err != nil {
-		rolling_log.ErrorErrorf(err, "server preHandleShard: sql: %s, hasHandled: %t", sql, hasHandled)
+		log.ErrorErrorf(err, "server preHandleShard: sql: %s, hasHandled: %t", sql, hasHandled)
 		return err
 	}
 	if hasHandled {
 		return nil
 	}
 
+	//解析sql语句,得到的stmt是一个interface
 	var stmt sqlparser.Statement
-	stmt, err = sqlparser.Parse(sql) //解析sql语句,得到的stmt是一个interface
+	stmt, err = sqlparser.Parse(sql)
 	if err != nil {
-		rolling_log.ErrorErrorf(err, "server parse: sql: %s, hasHandled: %t", sql, hasHandled)
+		log.ErrorErrorf(err, "server parse: sql: %s, hasHandled: %t", sql, hasHandled)
 		return err
 	}
 
@@ -114,7 +118,7 @@ func (c *ClientConn) getBackendConn(n *backend.Node, fromSlave bool) (co *backen
 			co, err = n.GetMasterConn()
 		}
 		if err != nil {
-			rolling_log.ErrorErrorf(err, "server getBackendConn")
+			log.ErrorErrorf(err, "server getBackendConn")
 			return
 		}
 	} else {
@@ -219,7 +223,7 @@ func (c *ClientConn) executeInNode(conn *backend.BackendConn, sql string, args [
 	if execTime > float64(c.proxy.slowLogTime[c.proxy.slowLogTimeIndex]) {
 		c.proxy.counter.IncrSlowLogTotal()
 
-		rolling_log.Printf("SLOW State: %s, %.1fms, Remote:%s, SQL: %s", state, execTime,
+		log.Printf("SLOW State: %s, %.1fms, Remote:%s, SQL: %s", state, execTime,
 			c.c.RemoteAddr(),
 			sql)
 	}
@@ -238,7 +242,7 @@ func (c *ClientConn) executeInMultiNodes(conns map[string]*backend.BackendConn, 
 	args []interface{}) ([]*mysql.Result, error) {
 
 	if len(conns) != len(sqls) {
-		rolling_log.ErrorErrorf(errors.ErrConnNotEqual, "ClientConn executeInMultiNodes")
+		log.ErrorErrorf(errors.ErrConnNotEqual, "ClientConn executeInMultiNodes")
 		//golog.Error("ClientConn", "executeInMultiNodes", errors.ErrConnNotEqual.Error(), c.connectionId,
 		//	"conns", conns,
 		//	"sqls", sqls,
@@ -284,7 +288,7 @@ func (c *ClientConn) executeInMultiNodes(conns map[string]*backend.BackendConn, 
 			if execTime > float64(c.proxy.slowLogTime[c.proxy.slowLogTimeIndex]) {
 				c.proxy.counter.IncrSlowLogTotal()
 
-				rolling_log.Printf("SLOW State: %s, %.1fms, Remote:%s, SQL: %s", state, execTime,
+				log.Printf("SLOW State: %s, %.1fms, Remote:%s, SQL: %s", state, execTime,
 					c.c.RemoteAddr(), v)
 			}
 			i++
@@ -377,7 +381,7 @@ func (c *ClientConn) handleExec(stmt sqlparser.Statement, args []interface{}) er
 	conns, err := c.getShardConns(false, plan)
 	defer c.closeShardConns(conns, err != nil)
 	if err != nil {
-		rolling_log.ErrorErrorf(err, "ClientConn handleExec: %s", c.connectionId)
+		log.ErrorErrorf(err, "ClientConn handleExec: %s", c.connectionId)
 		return err
 	}
 	if conns == nil {

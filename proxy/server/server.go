@@ -31,6 +31,7 @@ type BlacklistSqls struct {
 	sqlsLen int
 }
 
+// 定义节点的状态
 const (
 	Offline = iota
 	Online
@@ -72,8 +73,6 @@ func (s *Server) Status() string {
 		status = "online"
 	case Offline:
 		status = "offline"
-	case Unknown:
-		status = "unknown"
 	default:
 		status = "unknown"
 	}
@@ -175,10 +174,14 @@ func (s *Server) parseNode(cfg config.NodeConfig) (*backend.Node, error) {
 	return n, nil
 }
 
+//
+// 解析每一个Node的信息
+// IP, Port, User/password
 func (s *Server) parseNodes() error {
 	cfg := s.cfg
-	s.nodes = make(map[string]*backend.Node, len(cfg.Nodes))
 
+	// 要求节点定义无重复
+	s.nodes = make(map[string]*backend.Node, len(cfg.Nodes))
 	for _, v := range cfg.Nodes {
 		if _, ok := s.nodes[v.Name]; ok {
 			return fmt.Errorf("duplicate node [%s]", v.Name)
@@ -201,6 +204,7 @@ func (s *Server) parseSchema() error {
 		return fmt.Errorf("schema must have a node")
 	}
 
+	// 解析数据库节点
 	nodes := make(map[string]*backend.Node)
 	for _, n := range schemaCfg.Nodes {
 		if s.GetNode(n) == nil {
@@ -214,11 +218,13 @@ func (s *Server) parseSchema() error {
 		nodes[n] = s.GetNode(n)
 	}
 
+	// 解析rule
 	rule, err := router.NewRouter(&schemaCfg)
 	if err != nil {
 		return err
 	}
 
+	// 节点 + 规则 ==> 完整的数据库
 	s.schema = &Schema{
 		nodes: nodes,
 		rule:  rule,
@@ -235,6 +241,8 @@ func NewServer(cfg *config.Config) (*Server, error) {
 	s.addr = cfg.Addr
 	s.user = cfg.User
 	s.password = cfg.Password
+
+	// 初始状态
 	atomic.StoreInt32(&s.statusIndex, 0)
 	s.status[s.statusIndex] = Online
 	atomic.StoreInt32(&s.logSqlIndex, 0)
@@ -242,6 +250,7 @@ func NewServer(cfg *config.Config) (*Server, error) {
 	atomic.StoreInt32(&s.slowLogTimeIndex, 0)
 	s.slowLogTime[s.slowLogTimeIndex] = cfg.SlowLogTime
 
+	// XXX: 字符集的设计
 	if len(cfg.Charset) == 0 {
 		cfg.Charset = mysql.DEFAULT_CHARSET //utf8
 	}
@@ -249,6 +258,8 @@ func NewServer(cfg *config.Config) (*Server, error) {
 	if !ok {
 		return nil, errors.ErrInvalidCharset
 	}
+
+	// XXX: Default的参数也是可以修改的
 	//change the default charset
 	mysql.DEFAULT_CHARSET = cfg.Charset
 	mysql.DEFAULT_COLLATION_ID = cid
@@ -270,16 +281,17 @@ func NewServer(cfg *config.Config) (*Server, error) {
 		return nil, err
 	}
 
+	// 监听tcp socket
+	// TODO: 支持unix domain socket, 参考rpc_proxy来写
 	var err error
 	netProto := "tcp"
-
 	s.listener, err = net.Listen(netProto, s.addr)
 
 	if err != nil {
 		return nil, err
 	}
 
-	log.Printf("Proxy Server running, address: %s", s.addr)
+	log.Printf("Proxy server running: %s", s.addr)
 
 	return s, nil
 }
@@ -291,6 +303,9 @@ func (s *Server) flushCounter() {
 	}
 }
 
+//
+// 接受来自业务端的mysql的连接: ClienConn
+//
 func (s *Server) newClientConn(co net.Conn) *ClientConn {
 	c := new(ClientConn)
 	tcpConn := co.(*net.TCPConn)
@@ -371,7 +386,6 @@ func (s *Server) onConn(c net.Conn) {
 		return
 	}
 
-	log.Printf("New Connection created")
 	conn.Run()
 }
 

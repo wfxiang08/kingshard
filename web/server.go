@@ -44,12 +44,12 @@ func NewApiServer(cfg *config.Config, srv *server.Server) (*ApiServer, error) {
 
 	// 使用Echo服务
 	s.Echo = echo.New()
-	rolling_log.Printf("Web ApiServer running: %s", s.webAddr)
+	rolling_log.Printf("Web erver running: %s", s.webAddr)
 	return s, nil
 }
 
 func (s *ApiServer) Run() error {
-	rolling_log.Info("Web api server running...")
+	rolling_log.Info("Web server running...")
 	s.RegisterMiddleware()
 	s.RegisterURL()
 	std := standard.New(s.webAddr)

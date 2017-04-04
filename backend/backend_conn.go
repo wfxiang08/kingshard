@@ -1,17 +1,3 @@
-// Copyright 2016 The kingshard Authors. All rights reserved.
-//
-// Licensed under the Apache License, Version 2.0 (the "License"): you may
-// not use this file except in compliance with the License. You may obtain
-// a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
-// WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
-// License for the specific language governing permissions and limitations
-// under the License.
-
 package backend
 
 import (
@@ -30,6 +16,9 @@ var (
 	pingPeriod = int64(time.Second * 16)
 )
 
+//
+// 负责连接到后端MySQL服务器
+//
 //proxy <-> mysql server
 type Conn struct {
 	conn net.Conn
@@ -53,19 +42,22 @@ type Conn struct {
 	pkgErr        error
 }
 
+//
+// 使用给定的参数连接到后端数据库
+//
 func (c *Conn) Connect(addr string, user string, password string, db string) error {
 	c.addr = addr
 	c.user = user
 	c.password = password
 	c.db = db
 
-	//use utf8
-	// TODO: 支持其他编码? 例如: utf8mb4
+	// 可以通过Config文件的charset来修改
 	c.collation = mysql.DEFAULT_COLLATION_ID
 	c.charset = mysql.DEFAULT_CHARSET
 
 	return c.ReConnect()
 }
+
 
 func (c *Conn) ReConnect() error {
 	if c.conn != nil {

@@ -1,17 +1,3 @@
-// Copyright 2016 The kingshard Authors. All rights reserved.
-//
-// Licensed under the Apache License, Version 2.0 (the "License"): you may
-// not use this file except in compliance with the License. You may obtain
-// a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
-// WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
-// License for the specific language governing permissions and limitations
-// under the License.
-
 package backend
 
 import (
@@ -46,15 +32,22 @@ type DB struct {
 
 	maxConnNum  int
 	InitConnNum int
-	idleConns   chan *Conn
-	cacheConns  chan *Conn
-	checkConn   *Conn
-	lastPing    int64
+
+	// 一个DB后面对应着多个Connection
+	// cacheConns 复用可用的Connection
+	// idleConns 复用Connection对象，避免内存分配
+	idleConns  chan *Conn
+	cacheConns chan *Conn
+
+	// 专门用于做Ping等处理的
+	checkConn *Conn
+	lastPing  int64
 }
 
 // 创建一个DB
 func Open(addr string, user string, password string, dbName string, maxConnNum int) (*DB, error) {
 	var err error
+
 	db := new(DB)
 	db.addr = addr
 	db.user = user
@@ -85,6 +78,8 @@ func Open(addr string, user string, password string, dbName string, maxConnNum i
 	// 创建两个 chan
 	db.idleConns = make(chan *Conn, db.maxConnNum)
 	db.cacheConns = make(chan *Conn, db.maxConnNum)
+
+	// DB的初始状态是不确定的
 	atomic.StoreInt32(&(db.state), Unknown)
 
 	// 这里是什么逻辑呢?
@@ -101,6 +96,7 @@ func Open(addr string, user string, password string, dbName string, maxConnNum i
 			conn.pushTimestamp = time.Now().Unix()
 			db.cacheConns <- conn
 		} else {
+			// idleConns只是为了复用Conn对象，避免频繁的内存分配
 			conn := new(Conn)
 			db.idleConns <- conn
 		}
@@ -177,6 +173,8 @@ func (db *DB) getIdleConns() chan *Conn {
 
 func (db *DB) Ping() error {
 	var err error
+
+	// 专门的checkConn
 	if db.checkConn == nil {
 		db.checkConn, err = db.newConn()
 		if err != nil {
@@ -194,6 +192,9 @@ func (db *DB) Ping() error {
 	return nil
 }
 
+//
+// 创建一个到后端MySQL
+//
 func (db *DB) newConn() (*Conn, error) {
 	co := new(Conn)
 	if err := co.Connect(db.addr, db.user, db.password, db.db); err != nil {
@@ -362,6 +363,7 @@ func (db *DB) PushConn(co *Conn, err error) {
 	}
 }
 
+// 后端连接：
 type BackendConn struct {
 	*Conn
 	db *DB
