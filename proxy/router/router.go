@@ -56,9 +56,10 @@ type Rule struct {
 	Nodes []string
 	// 所有的子表的Index
 	// TableToNode 每个子表对应的Node的index
-	SubTableIndexs []int       //SubTableIndexs store all the index of sharding sub-table
-	TableToNode    map[int]int //key is table index, and value is node index
-	Shard          Shard       // 如何分Shard呢?
+	SubTableIndexs     []int       //SubTableIndexs store all the index of sharding sub-table
+	TableToNode        map[int]int //key is table index, and value is node index
+	Shard              Shard       // 如何分Shard呢?
+	AllNodeSingleTable bool        // 是否一个Node只有一个表，如果是，则Table中不带有下标
 }
 
 type Router struct {
@@ -221,6 +222,7 @@ func parseRule(cfg *config.ShardConfig) (*Rule, error) {
 			return nil, errors.ErrLocationsCount
 		}
 
+		isAllSingleTable := true
 		// 不同的Node, 每个Node对应不同的Locations
 		for i := 0; i < len(cfg.Locations); i++ {
 			// Location[i]什么概念呢?
@@ -232,7 +234,12 @@ func parseRule(cfg *config.ShardConfig) (*Rule, error) {
 				r.TableToNode[j+sumTables] = i
 			}
 			sumTables += cfg.Locations[i]
+			if cfg.Locations[i] != 1 {
+				isAllSingleTable = false
+			}
 		}
+		r.AllNodeSingleTable = isAllSingleTable
+
 	case DateDayRuleType:
 		if len(cfg.DateRange) != len(r.Nodes) {
 			return nil, errors.ErrDateRangeCount
@@ -598,11 +605,18 @@ func (r *Router) rewriteSelectSql(plan *Plan, node *sqlparser.Select, tableIndex
 		case *sqlparser.StarExpr:
 			//for shardTable.*,need replace table into shardTable_xxxx.
 			if string(v.TableName) == plan.Rule.Table {
-				fmt.Fprintf(buf, "%s%s_%04d.*",
-					prefix,
-					plan.Rule.Table,
-					tableIndex,
-				)
+				if plan.Rule.AllNodeSingleTable {
+					fmt.Fprintf(buf, "%s%s.*",
+						prefix,
+						plan.Rule.Table,
+					)
+				} else {
+					fmt.Fprintf(buf, "%s%s_%04d.*",
+						prefix,
+						plan.Rule.Table,
+						tableIndex,
+					)
+				}
 			} else {
 				buf.Fprintf("%s%v", prefix, expr)
 			}
@@ -611,12 +625,20 @@ func (r *Router) rewriteSelectSql(plan *Plan, node *sqlparser.Select, tableIndex
 			//into shardTable_xxxx.column as a
 			if colName, ok := v.Expr.(*sqlparser.ColName); ok {
 				if string(colName.Qualifier) == plan.Rule.Table {
-					fmt.Fprintf(buf, "%s%s_%04d.%s",
-						prefix,
-						plan.Rule.Table,
-						tableIndex,
-						string(colName.Name),
-					)
+					if plan.Rule.AllNodeSingleTable {
+						fmt.Fprintf(buf, "%s%s.%s",
+							prefix,
+							plan.Rule.Table,
+							string(colName.Name),
+						)
+					} else {
+						fmt.Fprintf(buf, "%s%s_%04d.%s",
+							prefix,
+							plan.Rule.Table,
+							tableIndex,
+							string(colName.Name),
+						)
+					}
 				} else {
 					buf.Fprintf("%s%v", prefix, colName)
 				}
@@ -643,46 +665,84 @@ func (r *Router) rewriteSelectSql(plan *Plan, node *sqlparser.Select, tableIndex
 	switch v := (node.From[0]).(type) {
 	case *sqlparser.AliasedTableExpr:
 		if len(v.As) != 0 {
-			fmt.Fprintf(buf, "%s_%04d as %s",
-				sqlparser.String(v.Expr),
-				tableIndex,
-				string(v.As),
-			)
+			if plan.Rule.AllNodeSingleTable {
+				fmt.Fprintf(buf, "%s as %s",
+					sqlparser.String(v.Expr),
+					string(v.As),
+				)
+			} else {
+				fmt.Fprintf(buf, "%s_%04d as %s",
+					sqlparser.String(v.Expr),
+					tableIndex,
+					string(v.As),
+				)
+			}
 		} else {
-			fmt.Fprintf(buf, "%s_%04d",
-				sqlparser.String(v.Expr),
-				tableIndex,
-			)
+			if plan.Rule.AllNodeSingleTable {
+				fmt.Fprintf(buf, "%s_%04d",
+					sqlparser.String(v.Expr),
+					tableIndex,
+				)
+			} else {
+				fmt.Fprintf(buf, "%s",
+					sqlparser.String(v.Expr),
+				)
+			}
 		}
 	case *sqlparser.JoinTableExpr:
 		if ate, ok := (v.LeftExpr).(*sqlparser.AliasedTableExpr); ok {
 			if len(ate.As) != 0 {
-				fmt.Fprintf(buf, "%s_%04d as %s",
-					sqlparser.String(ate.Expr),
-					tableIndex,
-					string(ate.As),
+				if plan.Rule.AllNodeSingleTable {
+					fmt.Fprintf(buf, "%s as %s",
+						sqlparser.String(ate.Expr),
+						string(ate.As),
+					)
+				} else {
+					fmt.Fprintf(buf, "%s_%04d as %s",
+						sqlparser.String(ate.Expr),
+						tableIndex,
+						string(ate.As),
+					)
+				}
+			} else {
+				if plan.Rule.AllNodeSingleTable {
+					fmt.Fprintf(buf, "%s",
+						sqlparser.String(ate.Expr),
+					)
+				} else {
+					fmt.Fprintf(buf, "%s_%04d",
+						sqlparser.String(ate.Expr),
+						tableIndex,
+					)
+				}
+			}
+		} else {
+			if plan.Rule.AllNodeSingleTable {
+				fmt.Fprintf(buf, "%s",
+					sqlparser.String(v.LeftExpr),
 				)
 			} else {
 				fmt.Fprintf(buf, "%s_%04d",
-					sqlparser.String(ate.Expr),
+					sqlparser.String(v.LeftExpr),
 					tableIndex,
 				)
 			}
-		} else {
-			fmt.Fprintf(buf, "%s_%04d",
-				sqlparser.String(v.LeftExpr),
-				tableIndex,
-			)
 		}
 		buf.Fprintf(" %s %v", v.Join, v.RightExpr)
 		if v.On != nil {
 			buf.Fprintf(" on %v", v.On)
 		}
 	default:
-		fmt.Fprintf(buf, "%s_%04d",
-			sqlparser.String(node.From[0]),
-			tableIndex,
-		)
+		if plan.Rule.AllNodeSingleTable {
+			fmt.Fprintf(buf, "%s",
+				sqlparser.String(node.From[0]),
+			)
+		} else {
+			fmt.Fprintf(buf, "%s_%04d",
+				sqlparser.String(node.From[0]),
+				tableIndex,
+			)
+		}
 	}
 	//append other tables
 	prefix = ", "
@@ -734,7 +794,7 @@ func (r *Router) generateSelectSql(plan *Plan, stmt sqlparser.Statement) error {
 
 		selectSql := buf.String()
 		sqls[nodeName] = []string{selectSql}
-		log.Infof("SQL@%s: %s", nodeName, selectSql)
+		log.Debugf("SQL@%s: %s", nodeName, selectSql)
 
 	} else {
 
@@ -752,7 +812,7 @@ func (r *Router) generateSelectSql(plan *Plan, stmt sqlparser.Statement) error {
 				sqls[nodeName] = make([]string, 0, tableCount)
 			}
 
-			log.Infof("SQL@%s: %s", nodeName, selectSql)
+			log.Debugf("SQL@%s: %s", nodeName, selectSql)
 			sqls[nodeName] = append(sqls[nodeName], selectSql)
 		}
 	}
@@ -774,7 +834,7 @@ func (r *Router) generateInsertSql(plan *Plan, stmt sqlparser.Statement) error {
 		stmt.Format(buf)
 		nodeName := r.Nodes[0]
 		insertSQL := buf.String()
-		log.Infof("SQL@%s: %s", nodeName, insertSQL)
+		log.Debugf("SQL@%s: %s", nodeName, insertSQL)
 		sqls[nodeName] = []string{insertSQL}
 	} else {
 		tableCount := len(plan.RouteTableIndexs)
@@ -785,7 +845,10 @@ func (r *Router) generateInsertSql(plan *Plan, stmt sqlparser.Statement) error {
 			nodeName := r.Nodes[nodeIndex]
 
 			buf.Fprintf("insert %v%s into %v", node.Comments, node.Ignore, node.Table)
-			fmt.Fprintf(buf, "_%04d", plan.RouteTableIndexs[i])
+
+			if !plan.Rule.AllNodeSingleTable {
+				fmt.Fprintf(buf, "_%04d", plan.RouteTableIndexs[i])
+			}
 			buf.Fprintf("%v %v%v",
 				node.Columns,
 				plan.Rows[tableIndex],
@@ -796,7 +859,7 @@ func (r *Router) generateInsertSql(plan *Plan, stmt sqlparser.Statement) error {
 			}
 
 			insertSQL := buf.String()
-			log.Infof("SQL@%s: %s", nodeName, insertSQL)
+			log.Debugf("SQL@%s: %s", nodeName, insertSQL)
 			sqls[nodeName] = append(sqls[nodeName], insertSQL)
 		}
 
@@ -820,7 +883,7 @@ func (r *Router) generateUpdateSql(plan *Plan, stmt sqlparser.Statement) error {
 		nodeName := r.Nodes[0]
 
 		updateSQL := buf.String()
-		log.Infof("SQL@%s: %s", nodeName, updateSQL)
+		log.Debugf("SQL@%s: %s", nodeName, updateSQL)
 
 		sqls[nodeName] = []string{updateSQL}
 	} else {
@@ -831,7 +894,10 @@ func (r *Router) generateUpdateSql(plan *Plan, stmt sqlparser.Statement) error {
 				node.Comments,
 				node.Table,
 			)
-			fmt.Fprintf(buf, "_%04d", plan.RouteTableIndexs[i])
+
+			if !plan.Rule.AllNodeSingleTable {
+				fmt.Fprintf(buf, "_%04d", plan.RouteTableIndexs[i])
+			}
 			buf.Fprintf(" set %v%v%v%v",
 				node.Exprs,
 				node.Where,
@@ -846,7 +912,7 @@ func (r *Router) generateUpdateSql(plan *Plan, stmt sqlparser.Statement) error {
 			}
 
 			updateSQL := buf.String()
-			log.Infof("SQL@%s: %s", nodeName, updateSQL)
+			log.Debugf("SQL@%s: %s", nodeName, updateSQL)
 			sqls[nodeName] = append(sqls[nodeName], updateSQL)
 		}
 
@@ -870,7 +936,7 @@ func (r *Router) generateDeleteSql(plan *Plan, stmt sqlparser.Statement) error {
 		nodeName := r.Nodes[0]
 
 		deleteSQL := buf.String()
-		log.Infof("SQL@%s: %s", nodeName, deleteSQL)
+		log.Debugf("SQL@%s: %s", nodeName, deleteSQL)
 
 		sqls[nodeName] = []string{deleteSQL}
 
@@ -882,7 +948,9 @@ func (r *Router) generateDeleteSql(plan *Plan, stmt sqlparser.Statement) error {
 				node.Comments,
 				node.Table,
 			)
-			fmt.Fprintf(buf, "_%04d", plan.RouteTableIndexs[i])
+			if !plan.Rule.AllNodeSingleTable {
+				fmt.Fprintf(buf, "_%04d", plan.RouteTableIndexs[i])
+			}
 			buf.Fprintf("%v%v%v",
 				node.Where,
 				node.OrderBy,
@@ -896,7 +964,7 @@ func (r *Router) generateDeleteSql(plan *Plan, stmt sqlparser.Statement) error {
 			}
 
 			deleteSQL := buf.String()
-			log.Infof("SQL@%s: %s", nodeName, deleteSQL)
+			log.Debugf("SQL@%s: %s", nodeName, deleteSQL)
 
 			sqls[nodeName] = append(sqls[nodeName], deleteSQL)
 		}
@@ -920,7 +988,7 @@ func (r *Router) generateReplaceSql(plan *Plan, stmt sqlparser.Statement) error 
 		stmt.Format(buf)
 		nodeName := r.Nodes[0]
 		replaceSQL := buf.String()
-		log.Infof("SQL@%s: %s", nodeName, replaceSQL)
+		log.Debugf("SQL@%s: %s", nodeName, replaceSQL)
 
 		sqls[nodeName] = []string{replaceSQL}
 	} else {
@@ -935,7 +1003,9 @@ func (r *Router) generateReplaceSql(plan *Plan, stmt sqlparser.Statement) error 
 				node.Comments,
 				node.Table,
 			)
-			fmt.Fprintf(buf, "_%04d", plan.RouteTableIndexs[i])
+			if !plan.Rule.AllNodeSingleTable {
+				fmt.Fprintf(buf, "_%04d", plan.RouteTableIndexs[i])
+			}
 			buf.Fprintf("%v %v",
 				node.Columns,
 				plan.Rows[tableIndex],
@@ -946,7 +1016,7 @@ func (r *Router) generateReplaceSql(plan *Plan, stmt sqlparser.Statement) error 
 			}
 
 			replaceSQL := buf.String()
-			log.Infof("SQL@%s: %s", nodeName, replaceSQL)
+			log.Debugf("SQL@%s: %s", nodeName, replaceSQL)
 			sqls[nodeName] = append(sqls[nodeName], replaceSQL)
 		}
 
@@ -969,7 +1039,7 @@ func (r *Router) generateTruncateSql(plan *Plan, stmt sqlparser.Statement) error
 		stmt.Format(buf)
 		nodeName := r.Nodes[0]
 		truncateSQL := buf.String()
-		log.Infof("SQL@%s: %s", nodeName, truncateSQL)
+		log.Debugf("SQL@%s: %s", nodeName, truncateSQL)
 		sqls[nodeName] = []string{truncateSQL}
 	} else {
 		tableCount := len(plan.RouteTableIndexs)
@@ -980,7 +1050,9 @@ func (r *Router) generateTruncateSql(plan *Plan, stmt sqlparser.Statement) error
 				node.TableOpt,
 				node.Table,
 			)
-			fmt.Fprintf(buf, "_%04d", plan.RouteTableIndexs[i])
+			if !plan.Rule.AllNodeSingleTable {
+				fmt.Fprintf(buf, "_%04d", plan.RouteTableIndexs[i])
+			}
 			tableIndex := plan.RouteTableIndexs[i]
 			nodeIndex := plan.Rule.TableToNode[tableIndex]
 			nodeName := r.Nodes[nodeIndex]
@@ -989,7 +1061,7 @@ func (r *Router) generateTruncateSql(plan *Plan, stmt sqlparser.Statement) error
 			}
 
 			truncateSQL := buf.String()
-			log.Infof("SQL@%s: %s", nodeName, truncateSQL)
+			log.Debugf("SQL@%s: %s", nodeName, truncateSQL)
 
 			sqls[nodeName] = append(sqls[nodeName], truncateSQL)
 		}
